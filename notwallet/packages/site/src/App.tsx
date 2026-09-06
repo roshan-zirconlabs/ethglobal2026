@@ -17,9 +17,50 @@ import {
   isSynchronousMode,
   toggleSynchronousApprovals,
 } from './utils';
+import { SimulatedCard } from './card';
+import { clearSign } from './clearsign';
+import type { RiskLevel } from './clearsign';
+import { previewRequest, signRequestWithCard } from './signing';
 import snapPackageInfo from '../../snap/package.json';
 
 const snapId = defaultSnapOrigin;
+
+// The offline signer. Swap `SimulatedCard` for a real HaLo/WebNFC card later —
+// the rest of the app depends only on the `CardSigner` interface.
+const card = new SimulatedCard();
+
+// A sample request used by `?demo=1` to showcase the clear-signing screen
+// without a live dapp (also handy for the demo video). Classic drainer:
+// an UNLIMITED USDC approval to an unknown spender.
+const DEMO_REQUEST = {
+  id: 'demo-request',
+  scope: 'eip155:1',
+  account: '00000000-0000-0000-0000-000000000000',
+  origin: 'https://app.some-defi.example',
+  request: {
+    method: 'eth_signTransaction',
+    params: [
+      {
+        from: '0x1111111111111111111111111111111111111111',
+        to: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+        value: '0x0',
+        data:
+          '0x095ea7b3' +
+          '000000000000000000000000ba5eba5eba5eba5eba5eba5eba5eba5eba5eba5e' +
+          'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+        chainId: '0x1',
+      },
+    ],
+  },
+} as unknown as KeyringRequest;
+
+const isDemoMode = (): boolean => {
+  try {
+    return new URLSearchParams(window.location.search).get('demo') === '1';
+  } catch {
+    return false;
+  }
+};
 
 const initialKeyringState: KeyringState = {
   pendingRequests: [],
@@ -365,6 +406,89 @@ const Options: FunctionComponent<{
   </Section>
 );
 
+const RISK_BG: Record<RiskLevel, string> = {
+  info: 'bg-secondary',
+  warn: 'bg-warning',
+  danger: 'bg-danger',
+};
+const RISK_TEXT: Record<RiskLevel, string> = {
+  info: 'text-secondary',
+  warn: 'text-warning',
+  danger: 'text-danger',
+};
+
+/**
+ * The clear-signing screen — the demo centerpiece. When MetaMask parks a signing
+ * request, this shows, in plain English, exactly what the card is about to sign,
+ * with risk flags, BEFORE the tap. This is what AirGap/Keycard/Tangem don't do.
+ */
+const ClearSignPanel: FunctionComponent<{
+  request?: KeyringRequest | undefined;
+  busy: boolean;
+  onApprove: (request: KeyringRequest) => void;
+  onReject: (request: KeyringRequest) => void;
+}> = ({ request, busy, onApprove, onReject }) => {
+  if (!request) {
+    return null;
+  }
+
+  const preview = previewRequest(request);
+  let summary: string;
+  let flags: { level: RiskLevel; message: string }[] = [];
+  let worst: RiskLevel = 'info';
+
+  if (preview.kind === 'tx') {
+    const result = clearSign(preview.tx, new Set());
+    summary = result.summary;
+    flags = result.flags;
+    worst = result.worstLevel;
+  } else if (preview.kind === 'message') {
+    summary = `Sign this message: “${preview.text}”`;
+  } else {
+    summary = `Approve request: ${preview.method}`;
+  }
+
+  return (
+    <div className="card border-2 mb-3" data-testid="ClearSignPanel">
+      <div className={`card-header text-white ${RISK_BG[worst]}`}>
+        <strong>Review &amp; tap your card to sign</strong>
+        <span className="badge bg-light text-dark float-end">
+          {worst.toUpperCase()}
+        </span>
+      </div>
+      <div className="card-body">
+        <p className="fs-5 fw-semibold mb-2">{summary}</p>
+        {flags.map((flag, index) => (
+          <div key={index} className={RISK_TEXT[flag.level]}>
+            • {flag.message}
+          </div>
+        ))}
+        <div className="d-flex gap-2 mt-3">
+          <button
+            type="button"
+            className={`btn ${worst === 'danger' ? 'btn-danger' : 'btn-primary'}`}
+            disabled={busy}
+            onClick={() => onApprove(request)}
+          >
+            {busy ? 'Signing on card…' : '📇 Tap card to approve'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-outline-secondary"
+            disabled={busy}
+            onClick={() => onReject(request)}
+          >
+            Reject
+          </button>
+        </div>
+        <p className="text-muted small mb-0 mt-2">
+          The signing key lives on the card — never on this computer.
+        </p>
+      </div>
+    </div>
+  );
+};
+
 export const App: FunctionComponent = () => {
   const [state, dispatch] = useContext(MetaMaskContext);
   const [snapState, setSnapState] = useState<KeyringState>(initialKeyringState);
@@ -374,6 +498,7 @@ export const App: FunctionComponent = () => {
   const [requestId, setRequestId] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
   const [isTogglingSync, setIsTogglingSync] = useState(false);
+  const [isSigning, setIsSigning] = useState(false);
 
   const handleError = useCallback(
     (error: unknown) => {
@@ -469,10 +594,46 @@ export const App: FunctionComponent = () => {
   };
 
   const createAccount = async () => {
-    const newAccount = await getClient().createAccount();
+    // Tap the card to read its public identity; the snap stores no private key.
+    const identity = await card.getIdentity();
+    const newAccount = await getClient().createAccount({
+      address: identity.address,
+      publicKey: identity.publicKey,
+      cardLabel: identity.label,
+    });
     await syncAccounts();
     return newAccount;
   };
+
+  const approveWithCard = useCallback(
+    async (request: KeyringRequest) => {
+      setIsSigning(true);
+      try {
+        // Sign on the card in the companion dapp, then hand the finished
+        // signature to the snap — which only relays it (it cannot sign itself).
+        const signature = await signRequestWithCard(request, card);
+        await getClient().approveRequest(request.id, { signature });
+        await syncRequests();
+      } catch (error) {
+        handleError(error);
+      } finally {
+        setIsSigning(false);
+      }
+    },
+    [handleError, syncRequests],
+  );
+
+  const rejectRequestByObject = useCallback(
+    async (request: KeyringRequest) => {
+      try {
+        await getClient().rejectRequest(request.id);
+        await syncRequests();
+      } catch (error) {
+        handleError(error);
+      }
+    },
+    [handleError, syncRequests],
+  );
 
   const importAccount = async () => {
     if (!privateKey) {
@@ -707,6 +868,12 @@ export const App: FunctionComponent = () => {
           {state.error.message}
         </div>
       )}
+      <ClearSignPanel
+        request={isDemoMode() ? DEMO_REQUEST : snapState.pendingRequests[0]}
+        busy={isSigning}
+        onApprove={approveWithCard}
+        onReject={rejectRequestByObject}
+      />
       <div className="row gx-3 gy-3 row-cols-1 row-cols-sm-2 row-cols-lg-3">
         <SnapConnection
           hasMetaMask={state.hasMetaMask}
