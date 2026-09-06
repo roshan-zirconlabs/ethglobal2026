@@ -90,19 +90,18 @@ through a MetaMask Snap and, later, through multi-factor derivation.
 | **Crypto correctness** | (round-trip test, not committed) | ✅ `personal_sign` and EIP-1559 tx both recover to the card address. |
 | **Runs in real Flask** | — | ✅ Snap installs; **card-backed account creation works in Flask** (verified: returns an account with `publicKey` and **no private key**). |
 
-**Proven end-to-end so far:** install snap → create a card-backed account in real
-MetaMask Flask, with no private key in the snap. The account shows the card's
-address and public key only.
+**Proven end-to-end (LIVE on Sepolia):** MFKDF is the default signer — the key is
+derived from an NFC card id + password (Argon2id), never stored. In real MetaMask
+Flask: create a card account (no key in the snap) → `personal_sign` ✅ → a real
+**EIP-1559 transaction signed and broadcast on Sepolia** ✅ → wrong password/card
+is rejected before signing ✅. The full thesis works.
 
 ## 5. What's LEFT ⏳ (in priority order)
 
-1. **Finish the live signing round-trip in Flask** *(ready to test — code path complete).*
-   - `personal_sign`: approve via the **clear-sign panel** → confirm the dapp
-     receives a valid signature (recovers to the card address).
-   - Then `eth_signTransaction` on **Sepolia**: fund the card account, send a tx,
-     confirm broadcast. Watch for result-shape issues MetaMask may reject.
-   - Then `eth_signTypedData_v4`: trigger a typed-data sign, confirm the clear-sign
-     panel shows the Permit/typed-data details and signature succeeds.
+1. ~~**Live signing round-trip in Flask**~~ ✅ DONE — `personal_sign` + a real
+   Sepolia EIP-1559 tx both work with MFKDF; wrong-credential guard verified.
+   - Remaining sub-item: `eth_signTypedData_v4` live check (Permit/typed-data
+     panel + signature) — code path exists, not yet exercised live.
 2. ~~**Fix the redirect origin**~~ ✅ Done. `#getCompanionUrl()` now falls back to
    `localhost:8000` in dev. Reinstall after dev build.
 3. ~~**Typed-data signing**~~ ✅ Done. `eth_signTypedData_v3/v4` in `signing.ts` +
