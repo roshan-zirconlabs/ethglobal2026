@@ -1063,9 +1063,27 @@ export const App: FunctionComponent = () => {
     async (request: KeyringRequest) => {
       setIsSigning(true);
       try {
+        const signer = buildSigner();
+        // GUARD: verify the derived key matches THIS account *before* signing.
+        // A wrong password or card derives a different key — we must fail loudly
+        // and leave the request pending, never relay a wrong-key signature.
+        const identity = await signer.getIdentity();
+        const account = snapState.accounts.find(
+          (item) => item.id === request.account,
+        );
+        if (
+          account &&
+          identity.address.toLowerCase() !== account.address.toLowerCase()
+        ) {
+          throw new Error(
+            `Wrong password or card. The key it derived (${identity.address}) ` +
+              `does not match this account (${account.address}). ` +
+              `Nothing was signed — fix the password/card and try again.`,
+          );
+        }
         // Sign on the card in the companion dapp, then hand the finished
         // signature to the snap — which only relays it (it cannot sign itself).
-        const signature = await signRequestWithCard(request, buildSigner());
+        const signature = await signRequestWithCard(request, signer);
         await getClient().approveRequest(request.id, { signature });
         await syncRequests();
       } catch (error) {
@@ -1074,7 +1092,7 @@ export const App: FunctionComponent = () => {
         setIsSigning(false);
       }
     },
-    [buildSigner, handleError, syncRequests],
+    [buildSigner, handleError, snapState.accounts, syncRequests],
   );
 
   const rejectRequestByObject = useCallback(
