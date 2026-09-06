@@ -172,8 +172,10 @@ async function signTransaction(txIn: any, card: CardSigner): Promise<Json> {
   // Build a clean ethers tx (drop `from` and any non-tx fields it rejects).
   const txLike: Record<string, unknown> = {};
   for (const field of ETHERS_TX_FIELDS) {
-    if (txIn?.[field] !== undefined && txIn[field] !== null) {
-      txLike[field] = txIn[field];
+    const value = txIn?.[field];
+    if (value !== undefined && value !== null) {
+      // MetaMask sends `type` as a hex string ("0x2"); ethers wants a number.
+      txLike[field] = field === 'type' ? Number(value) : value;
     }
   }
   const unsigned = Transaction.from(txLike);
