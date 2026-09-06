@@ -161,6 +161,9 @@ export default function App() {
           <p className="hint">
             Your key is derived from these two, used to sign, then wiped. Same
             password + card always gives the same account.
+            <br />
+            No NFC card readable? Type any secret code as your “card id” — it works
+            exactly the same (it's your “something you have” factor).
           </p>
         </>
       )}
