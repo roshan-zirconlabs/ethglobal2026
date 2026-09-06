@@ -7,7 +7,7 @@
     "url": "git+https://github.com/MetaMask/snap-simple-keyring.git"
   },
   "source": {
-    "shasum": "bqHNSSDe3pk8vGv9f356x9LLmUh0rdDWr0WxVECmhY8=",
+    "shasum": "sz/mseqQi1OTx/liEA8EiX3DuvOMDx3fL5psWI1G4ok=",
     "location": {
       "npm": {
         "filePath": "dist/bundle.js",
@@ -19,7 +19,11 @@
   },
   "initialPermissions": {
     "endowment:keyring": {
-      "allowedOrigins": ["https://metamask.github.io", "metamask.github.io"]
+      "allowedOrigins": [
+        "https://metamask.github.io",
+        "metamask.github.io",
+        "http://localhost:8000"
+      ]
     },
     "endowment:rpc": {
       "dapps": true
