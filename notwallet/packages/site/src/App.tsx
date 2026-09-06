@@ -817,11 +817,12 @@ export const App: FunctionComponent = () => {
       action: {
         disabled: !state.installedSnap || !requestId,
         callback: async () => {
-          const response = await getClient().approveRequest(requestId);
-          await syncRequests();
-          return response;
+          // Route through the card: fetch the request, clear-sign + sign on the
+          // card, then relay the signature. (The snap never signs by itself.)
+          const request = await getClient().getRequest(requestId);
+          await approveWithCard(request);
         },
-        label: 'Approve Request',
+        label: 'Approve Request (via card)',
       },
     },
     {
