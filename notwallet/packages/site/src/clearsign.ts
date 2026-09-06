@@ -53,7 +53,7 @@ export function clearSign(tx: DecodedTx, knownAddresses: Set<string>): ClearSign
   } else {
     const parsed = tryParse(tx.data);
     if (parsed?.name === "approve") {
-      const [spender, amount] = parsed.args as [string, bigint];
+      const [spender, amount] = parsed.args as unknown as [string, bigint];
       const infinite = amount >= MaxUint256 / 2n;
       summary = infinite
         ? `Give ${short(spender)} UNLIMITED permission to spend your ${short(to)} tokens.`
@@ -61,14 +61,14 @@ export function clearSign(tx: DecodedTx, knownAddresses: Set<string>): ClearSign
       if (infinite)
         flags.push({ level: "danger", message: "Infinite token approval — a common drainer pattern." });
     } else if (parsed?.name === "setApprovalForAll") {
-      const [op, approved] = parsed.args as [string, boolean];
+      const [op, approved] = parsed.args as unknown as [string, boolean];
       summary = approved
         ? `Give ${short(op)} control of ALL your NFTs in this collection.`
         : `Revoke ${short(op)}'s access to your NFTs.`;
       if (approved)
         flags.push({ level: "danger", message: "Grants control over an entire NFT collection." });
     } else if (parsed?.name === "transfer") {
-      const [dest, amount] = parsed.args as [string, bigint];
+      const [dest, amount] = parsed.args as unknown as [string, bigint];
       summary = `Transfer ${amount} tokens to ${short(dest)}.`;
     }
   }
