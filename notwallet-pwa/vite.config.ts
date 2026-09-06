@@ -1,3 +1,4 @@
+import basicSsl from '@vitejs/plugin-basic-ssl';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -6,6 +7,9 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig({
   plugins: [
     react(),
+    // Local HTTPS so the phone (camera + WebNFC need a secure context) can use it
+    // over the LAN. Self-signed — tap through the warning once on the phone.
+    basicSsl(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['icon.svg'],
