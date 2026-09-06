@@ -24,6 +24,7 @@ import type { RiskLevel, RiskFlag } from './clearsign';
 import { previewRequest, signRequestWithCard } from './signing';
 import { MfkdfCard, readNfcCardId } from './card-mfkdf';
 import { DesktopPhoneBridge } from './DesktopPhoneBridge';
+import { PairPhoneWallet } from './PairPhoneWallet';
 import type { RequestPreview } from './signing';
 import snapPackageInfo from '../../snap/package.json';
 import './clearsign-ui.css';
@@ -1050,6 +1051,15 @@ export const App: FunctionComponent = () => {
     }
   }, [handleError]);
 
+  // Register an account paired from the phone app (public info only, no key).
+  const handlePairAccount = useCallback(
+    async (address: string, publicKey: string, label: string) => {
+      await getClient().createAccount({ address, publicKey, cardLabel: label });
+      await syncAccounts();
+    },
+    [syncAccounts],
+  );
+
   const createAccount = async () => {
     // Derive the card's public identity; the snap stores NO private key.
     const identity = await buildSigner().getIdentity();
@@ -1426,6 +1436,10 @@ export const App: FunctionComponent = () => {
             }
           />
         </Section>
+        <PairPhoneWallet
+          onAccount={handlePairAccount}
+          disabled={!state.installedSnap}
+        />
         <Options
           checked={snapState.useSynchronousApprovals}
           enabled={Boolean(state.installedSnap)}

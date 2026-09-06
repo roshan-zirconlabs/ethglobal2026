@@ -66,6 +66,32 @@ export function decodeSignature(text: string): { id: string; signature: Json } {
   return { id: sig.id, signature: sig.signature };
 }
 
+export type AccountEnvelope = {
+  p: typeof PROTOCOL;
+  kind: 'account';
+  address: string;
+  publicKey: string;
+  label: string;
+};
+
+/** Decode a phone's pairing QR (address + publicKey) on the desktop. */
+export function decodeAccount(text: string): {
+  address: string;
+  publicKey: string;
+  label: string;
+} {
+  const env = parse(text);
+  if (env.kind !== 'account') {
+    throw new Error('That QR is not an account pairing.');
+  }
+  const account = env as AccountEnvelope;
+  return {
+    address: account.address,
+    publicKey: account.publicKey,
+    label: account.label,
+  };
+}
+
 function parse(text: string): { kind: string } {
   let env: any;
   try {
