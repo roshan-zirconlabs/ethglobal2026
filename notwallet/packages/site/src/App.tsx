@@ -1,5 +1,6 @@
 import type { KeyringAccount, KeyringRequest } from '@metamask/keyring-api';
 import { KeyringSnapRpcClient } from '@metamask/keyring-snap-client';
+import type { Json } from '@metamask/utils';
 import type {
   ChangeEvent,
   FormEvent,
@@ -22,6 +23,7 @@ import { clearSign, clearSignTypedData, short } from './clearsign';
 import type { RiskLevel, RiskFlag } from './clearsign';
 import { previewRequest, signRequestWithCard } from './signing';
 import { MfkdfCard, readNfcCardId } from './card-mfkdf';
+import { DesktopPhoneBridge } from './DesktopPhoneBridge';
 import type { RequestPreview } from './signing';
 import snapPackageInfo from '../../snap/package.json';
 import './clearsign-ui.css';
@@ -928,6 +930,7 @@ export const App: FunctionComponent = () => {
   const [mfkdfPassword, setMfkdfPassword] = useState('');
   const [cardId, setCardId] = useState('');
   const [isReadingCard, setIsReadingCard] = useState(false);
+  const [signOnPhone, setSignOnPhone] = useState(false);
 
   // ── Demo mode ──────────────────────────────────────────────────────────────
   if (isDemoMode()) {
@@ -1093,6 +1096,21 @@ export const App: FunctionComponent = () => {
       }
     },
     [buildSigner, handleError, snapState.accounts, syncRequests],
+  );
+
+  // Signature produced on the PHONE (scanned via QR) — just relay it to the snap.
+  // The key was derived and used on the phone; it never touched this machine.
+  const handlePhoneSignature = useCallback(
+    async (id: string, signature: Json) => {
+      try {
+        await getClient().approveRequest(id, { signature });
+        await syncRequests();
+        setSignOnPhone(false);
+      } catch (error) {
+        handleError(error);
+      }
+    },
+    [handleError, syncRequests],
   );
 
   const rejectRequestByObject = useCallback(
@@ -1373,6 +1391,25 @@ export const App: FunctionComponent = () => {
           origin={(activeRequest as any)?.origin}
         />
       </div>
+
+      {activeRequest &&
+        (signOnPhone ? (
+          <DesktopPhoneBridge
+            request={activeRequest}
+            onSignature={handlePhoneSignature}
+            onCancel={() => setSignOnPhone(false)}
+          />
+        ) : (
+          <div className="text-center mb-3">
+            <button
+              type="button"
+              className="btn btn-outline-primary"
+              onClick={() => setSignOnPhone(true)}
+            >
+              📱 Sign on phone instead (air-gapped)
+            </button>
+          </div>
+        ))}
 
       <div className="row gx-3 gy-3 row-cols-1 row-cols-sm-2 row-cols-lg-3">
         <SnapConnection

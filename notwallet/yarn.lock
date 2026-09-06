@@ -1961,9 +1961,12 @@ __metadata:
     "@metamask/keyring-snap-client": ^9.0.2
     "@metamask/providers": ^19.0.0
     "@swc/core": 1.3.78
+    "@types/qrcode": ^1.5.6
     "@types/react": ^18.0.28
     "@typescript-eslint/eslint-plugin": ^5.55.0
     "@typescript-eslint/parser": ^5.55.0
+    "@zxing/browser": ^0.2.1
+    "@zxing/library": ^0.23.0
     bootstrap: ^5.2.2
     copy-webpack-plugin: ^11.0.0
     cross-env: ^7.0.3
@@ -1981,6 +1984,7 @@ __metadata:
     hash-wasm: ^4.11.0
     html-webpack-plugin: ^5.5.0
     prettier: ^2.8.4
+    qrcode: ^1.5.4
     react: ^18.2.0
     react-dom: ^18.2.0
     rimraf: ^4.4.0
@@ -2854,6 +2858,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/qrcode@npm:^1.5.6":
+  version: 1.5.6
+  resolution: "@types/qrcode@npm:1.5.6"
+  dependencies:
+    "@types/node": "*"
+  checksum: 7a10d298a9987dc4f0cdfdc5171dabafaf0945cc97e5daa6b609e726a57aa4a48ae0e966c68379ef390d61d3cd6621b9b04214bb16b42f5486a46349e1db254d
+  languageName: node
+  linkType: hard
+
 "@types/qs@npm:*":
   version: 6.9.8
   resolution: "@types/qs@npm:6.9.8"
@@ -3341,6 +3354,40 @@ __metadata:
   version: 4.2.2
   resolution: "@xtuc/long@npm:4.2.2"
   checksum: 8ed0d477ce3bc9c6fe2bf6a6a2cc316bb9c4127c5a7827bae947fa8ec34c7092395c5a283cc300c05b5fa01cbbfa1f938f410a7bf75db7c7846fea41949989ec
+  languageName: node
+  linkType: hard
+
+"@zxing/browser@npm:^0.2.1":
+  version: 0.2.1
+  resolution: "@zxing/browser@npm:0.2.1"
+  dependencies:
+    "@zxing/text-encoding": ^0.9.0
+  peerDependencies:
+    "@zxing/library": ^0.23.0
+  dependenciesMeta:
+    "@zxing/text-encoding":
+      optional: true
+  checksum: 542cd184c7fee4dc5cf96b01bfbd2afaa2333e7b4ecb38cbf58ba4422642830d5e99aa8c1914f1a6a16422409215dd20b1ad3a6a203577cc0aaee2c2a395a50e
+  languageName: node
+  linkType: hard
+
+"@zxing/library@npm:^0.23.0":
+  version: 0.23.0
+  resolution: "@zxing/library@npm:0.23.0"
+  dependencies:
+    "@zxing/text-encoding": ~0.9.0
+    ts-custom-error: ^3.3.1
+  dependenciesMeta:
+    "@zxing/text-encoding":
+      optional: true
+  checksum: 2921c553e2a74e9fd58d10e26110ade8f9ad7b05960650a49a9a5ccfadbd63de4276670279f69398d548fb09dfaa22b681cc93b0642178b3fceba0e97aa03cbf
+  languageName: node
+  linkType: hard
+
+"@zxing/text-encoding@npm:^0.9.0, @zxing/text-encoding@npm:~0.9.0":
+  version: 0.9.0
+  resolution: "@zxing/text-encoding@npm:0.9.0"
+  checksum: c23b12aee7639382e4949961304a1294776afaffa40f579e09ffecd0e5e68cf26ef3edd75009de46da8a536e571448755ca68b3e2ea707d53793c0edb2e2c34a
   languageName: node
   linkType: hard
 
@@ -10895,6 +10942,13 @@ __metadata:
   version: 3.0.1
   resolution: "totalist@npm:3.0.1"
   checksum: 5132d562cf88ff93fd710770a92f31dbe67cc19b5c6ccae2efc0da327f0954d211bbfd9456389655d726c624f284b4a23112f56d1da931ca7cfabbe1f45e778a
+  languageName: node
+  linkType: hard
+
+"ts-custom-error@npm:^3.3.1":
+  version: 3.3.1
+  resolution: "ts-custom-error@npm:3.3.1"
+  checksum: 50a1e825fced68d70049bd8d282379a635e43aa023a370fa8e736b12a6edba7f18a2d731fa194ac35303a8b625be56e121bdb31d8a0318250d1a8b277059fce3
   languageName: node
   linkType: hard
 
