@@ -291,16 +291,17 @@ export class CardKeyring implements Keyring {
   }
 
   #getCompanionUrl(): string {
-    const dappUrlPrefix =
-      process.env.NODE_ENV === 'production'
-        ? process.env.DAPP_ORIGIN_PRODUCTION
-        : process.env.DAPP_ORIGIN_DEVELOPMENT;
-    const dappVersion: string = packageInfo.version;
-
-    if (dappUrlPrefix && dappVersion && process.env.NODE_ENV === 'production') {
-      return `${dappUrlPrefix}${dappVersion}/`;
+    if (process.env.NODE_ENV === 'production') {
+      const prodOrigin = process.env.DAPP_ORIGIN_PRODUCTION;
+      const dappVersion: string = packageInfo.version;
+      if (prodOrigin && dappVersion) {
+        return `${prodOrigin}${dappVersion}/`;
+      }
+      // Fallback: bare production origin or the dev URL.
+      return prodOrigin ?? 'http://localhost:8000';
     }
-    return dappUrlPrefix as string;
+    // Development: always the local companion dapp.
+    return process.env.DAPP_ORIGIN_DEVELOPMENT ?? 'http://localhost:8000';
   }
 
   async #saveState(): Promise<void> {

@@ -84,6 +84,115 @@ export function clearSign(tx: DecodedTx, knownAddresses: Set<string>): ClearSign
   return { summary, flags, worstLevel: worst(flags) };
 }
 
+/**
+ * Clear-sign EIP-712 typed data.
+ *
+ * This catches the most common typed-data phishing patterns:
+ *   • ERC-2612 Permit (token spending approval via signature — no tx needed)
+ *   • Permit2 (Uniswap's universal permit)
+ *   • Seaport / marketplace orders
+ *   • setApprovalForAll-like typed messages
+ */
+export function clearSignTypedData(
+  domain: { name?: string | undefined; verifyingContract?: string | undefined; chainId?: number | undefined },
+  primaryType: string,
+  message: Record<string, unknown>,
+  knownAddresses: Set<string>,
+): ClearSignResult {
+  const flags: RiskFlag[] = [];
+  const domainName = domain.name ?? "Unknown dApp";
+  const contract = domain.verifyingContract ? short(safeAddress(domain.verifyingContract)) : "unknown contract";
+
+  let summary = `Sign a "${primaryType}" message for ${domainName} (${contract}).`;
+
+  // ---- Permit (ERC-2612) ----
+  if (primaryType === "Permit") {
+    const spender = message.spender as string | undefined;
+    const value = message.value as string | undefined;
+    const deadline = message.deadline as string | undefined;
+
+    const isInfiniteValue =
+      value !== undefined && BigInt(value) >= MaxUint256 / 2n;
+    const isInfiniteDeadline =
+      deadline !== undefined && BigInt(deadline) >= BigInt("0xffffffff");
+
+    const spenderStr = spender ? short(safeAddress(spender)) : "unknown";
+    summary = isInfiniteValue
+      ? `Give ${spenderStr} UNLIMITED permission to spend your tokens (off-chain Permit on ${domainName}).`
+      : `Allow ${spenderStr} to spend up to ${value ?? "?"} tokens (off-chain Permit on ${domainName}).`;
+
+    flags.push({
+      level: "danger",
+      message: "ERC-2612 Permit — approves token spending via signature alone (no on-chain tx needed to drain).",
+    });
+    if (isInfiniteValue) {
+      flags.push({ level: "danger", message: "Infinite amount — the spender can take all your tokens." });
+    }
+    if (isInfiniteDeadline) {
+      flags.push({ level: "warn", message: "No meaningful deadline — this permit never expires." });
+    }
+    if (spender && !knownAddresses.has(spender.toLowerCase())) {
+      flags.push({ level: "warn", message: `New spender you've never interacted with: ${spenderStr}.` });
+    }
+  }
+  // ---- Permit2 (Uniswap) ----
+  else if (
+    primaryType === "PermitSingle" ||
+    primaryType === "PermitBatch" ||
+    primaryType === "PermitTransferFrom" ||
+    primaryType === "PermitBatchTransferFrom"
+  ) {
+    summary = `Permit2: authorize token transfer(s) via ${domainName}.`;
+    flags.push({
+      level: "danger",
+      message: "Permit2 signature — can authorize token transfers without an on-chain approval tx.",
+    });
+
+    // Check nested details
+    const details = message.details as Record<string, unknown> | undefined;
+    const permitted = message.permitted as Record<string, unknown> | undefined;
+    const spender = (message.spender ?? details?.spender) as string | undefined;
+    if (spender && !knownAddresses.has(spender.toLowerCase())) {
+      flags.push({ level: "warn", message: `New spender: ${short(safeAddress(spender))}.` });
+    }
+    const amount = (details?.amount ?? permitted?.amount) as string | undefined;
+    if (amount && BigInt(amount) >= MaxUint256 / 2n) {
+      flags.push({ level: "danger", message: "Unlimited amount — the spender can take all tokens of this type." });
+    }
+  }
+  // ---- Seaport / marketplace orders ----
+  else if (primaryType === "OrderComponents" || primaryType === "Order") {
+    summary = `Marketplace order on ${domainName} — listing or offer.`;
+    flags.push({ level: "warn", message: "Marketplace order — verify items and price carefully." });
+  }
+  // ---- Catch-all: any typed data mentioning "approval" or "permit" ----
+  else {
+    const typeLC = primaryType.toLowerCase();
+    const hasApprovalKeyword =
+      typeLC.includes("permit") ||
+      typeLC.includes("approval") ||
+      typeLC.includes("allowance");
+
+    if (hasApprovalKeyword) {
+      flags.push({
+        level: "warn",
+        message: `This typed data mentions "${primaryType}" — may authorize token access.`,
+      });
+    }
+
+    // Check message fields for suspicious spender/operator addresses
+    const spenderLike = (message.spender ?? message.operator ?? message.to) as string | undefined;
+    if (spenderLike && !knownAddresses.has(spenderLike.toLowerCase())) {
+      flags.push({
+        level: "info",
+        message: `Message references address ${short(safeAddress(spenderLike))}.`,
+      });
+    }
+  }
+
+  return { summary, flags, worstLevel: worst(flags) };
+}
+
 function tryParse(data: string) {
   try {
     return erc20.parseTransaction({ data });
@@ -111,7 +220,7 @@ function extractCounterparty(to: string | null, data: string): string | null {
   }
   return to;
 }
-function short(a: string) {
+export function short(a: string) {
   return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
 }
 function worst(flags: RiskFlag[]): RiskLevel {

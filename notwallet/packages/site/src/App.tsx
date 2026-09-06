@@ -18,22 +18,59 @@ import {
   toggleSynchronousApprovals,
 } from './utils';
 import { SimulatedCard } from './card';
-import { clearSign } from './clearsign';
-import type { RiskLevel } from './clearsign';
+import { clearSign, clearSignTypedData, short } from './clearsign';
+import type { RiskLevel, RiskFlag } from './clearsign';
 import { previewRequest, signRequestWithCard } from './signing';
+import { MfkdfCard, readNfcCardId } from './card-mfkdf';
+import type { RequestPreview } from './signing';
 import snapPackageInfo from '../../snap/package.json';
+import './clearsign-ui.css';
 
 const snapId = defaultSnapOrigin;
 
-// The offline signer. Swap `SimulatedCard` for a real HaLo/WebNFC card later —
-// the rest of the app depends only on the `CardSigner` interface.
-const card = new SimulatedCard();
+// ── Card signer selection ──────────────────────────────────────────────────────
+// By default, use SimulatedCard (software key in localStorage — DEV ONLY).
+// Add `?card=halo` to the URL to use a real Arx HaLo NFC chip instead.
+// The rest of the app depends only on the `CardSigner` interface — no changes
+// needed when swapping implementations.
+import type { CardSigner } from './card';
 
-// A sample request used by `?demo=1` to showcase the clear-signing screen
-// without a live dapp (also handy for the demo video). Classic drainer:
-// an UNLIMITED USDC approval to an unknown spender.
-const DEMO_REQUEST = {
-  id: 'demo-request',
+// Card mode: default is MFKDF (card ID + password → derived key, nothing stored).
+// `?card=sim` uses the software SimulatedCard (quick tests, no password/NFC).
+// `?card=halo` uses a real Arx HaLo NFC chip.
+const CARD_MODE: 'mfkdf' | 'sim' | 'halo' = (() => {
+  try {
+    const mode = new URLSearchParams(window.location.search).get('card');
+    if (mode === 'sim' || mode === 'halo') {
+      return mode;
+    }
+  } catch {
+    // ignore
+  }
+  return 'mfkdf';
+})();
+
+// For the sim/halo modes, the signer is static. For MFKDF it's built per-op from
+// the live password + card id (see `buildSigner` in the component).
+function staticSigner(): CardSigner | null {
+  if (CARD_MODE === 'sim') {
+    return new SimulatedCard();
+  }
+  if (CARD_MODE === 'halo') {
+    // The real HaLo path (src/card-halo.ts) is kept for later but NOT bundled in
+    // v1 — libhalo drags in node-only deps that break the web build. Wire it back
+    // in during the physical-card milestone.
+    console.warn('HaLo mode is not enabled in this build; using MFKDF instead.');
+  }
+  return null; // default: MFKDF (built from live password + card id)
+}
+
+// ── Demo requests ──────────────────────────────────────────────────────────────
+// Showcase clear-signing without a live dapp (also handy for demo video).
+
+/** Classic drainer: UNLIMITED USDC approval to an unknown spender. */
+const DEMO_TX_APPROVAL = {
+  id: 'demo-tx-approval',
   scope: 'eip155:1',
   account: '00000000-0000-0000-0000-000000000000',
   origin: 'https://app.some-defi.example',
@@ -54,9 +91,107 @@ const DEMO_REQUEST = {
   },
 } as unknown as KeyringRequest;
 
+/** Simple ETH transfer — should show as safe/info. */
+const DEMO_TX_TRANSFER = {
+  id: 'demo-tx-transfer',
+  scope: 'eip155:1',
+  account: '00000000-0000-0000-0000-000000000000',
+  origin: 'https://app.uniswap.org',
+  request: {
+    method: 'eth_signTransaction',
+    params: [
+      {
+        from: '0x1111111111111111111111111111111111111111',
+        to: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
+        value: '0x2386f26fc10000', // 0.01 ETH
+        data: '0x',
+        chainId: '0x1',
+      },
+    ],
+  },
+} as unknown as KeyringRequest;
+
+/** ERC-2612 Permit — off-chain token approval phishing. */
+const DEMO_TYPED_PERMIT = {
+  id: 'demo-typed-permit',
+  scope: 'eip155:1',
+  account: '00000000-0000-0000-0000-000000000000',
+  origin: 'https://phishing-site.example',
+  request: {
+    method: 'eth_signTypedData_v4',
+    params: [
+      '0x1111111111111111111111111111111111111111',
+      JSON.stringify({
+        types: {
+          EIP712Domain: [
+            { name: 'name', type: 'string' },
+            { name: 'version', type: 'string' },
+            { name: 'chainId', type: 'uint256' },
+            { name: 'verifyingContract', type: 'address' },
+          ],
+          Permit: [
+            { name: 'owner', type: 'address' },
+            { name: 'spender', type: 'address' },
+            { name: 'value', type: 'uint256' },
+            { name: 'nonce', type: 'uint256' },
+            { name: 'deadline', type: 'uint256' },
+          ],
+        },
+        primaryType: 'Permit',
+        domain: {
+          name: 'USD Coin',
+          version: '2',
+          chainId: 1,
+          verifyingContract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+        },
+        message: {
+          owner: '0x1111111111111111111111111111111111111111',
+          spender: '0xba5eba5eba5eba5eba5eba5eba5eba5eba5eba5e',
+          value:
+            '115792089237316195423570985008687907853269984665640564039457584007913129639935',
+          nonce: '0',
+          deadline:
+            '115792089237316195423570985008687907853269984665640564039457584007913129639935',
+        },
+      }),
+    ],
+  },
+} as unknown as KeyringRequest;
+
+/** Personal sign — simple message. */
+const DEMO_PERSONAL_SIGN = {
+  id: 'demo-personal-sign',
+  scope: 'eip155:1',
+  account: '00000000-0000-0000-0000-000000000000',
+  origin: 'https://app.ens.domains',
+  request: {
+    method: 'personal_sign',
+    params: [
+      '0x' +
+        Array.from(new TextEncoder().encode('Welcome to ENS! Please sign this message to verify your wallet ownership.'))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join(''),
+      '0x1111111111111111111111111111111111111111',
+    ],
+  },
+} as unknown as KeyringRequest;
+
+type DemoScenario = {
+  label: string;
+  request: KeyringRequest;
+};
+
+const DEMO_SCENARIOS: DemoScenario[] = [
+  { label: '🚨 Infinite Approval', request: DEMO_TX_APPROVAL },
+  { label: '💸 ETH Transfer', request: DEMO_TX_TRANSFER },
+  { label: '🔏 Permit (ERC-2612)', request: DEMO_TYPED_PERMIT },
+  { label: '✉️ Personal Sign', request: DEMO_PERSONAL_SIGN },
+];
+
 const isDemoMode = (): boolean => {
   try {
-    return new URLSearchParams(window.location.search).get('demo') === '1';
+    const p = new URLSearchParams(window.location.search);
+    return p.get('demo') === '1' || p.get('demo') === 'permit' || p.has('demo');
   } catch {
     return false;
   }
@@ -406,35 +541,42 @@ const Options: FunctionComponent<{
   </Section>
 );
 
-const RISK_BG: Record<RiskLevel, string> = {
-  info: 'bg-secondary',
-  warn: 'bg-warning',
-  danger: 'bg-danger',
+// ── Risk flag icons ────────────────────────────────────────────────────────────
+const FLAG_ICON: Record<RiskLevel, string> = {
+  info: 'ℹ️',
+  warn: '⚠️',
+  danger: '🚨',
 };
-const RISK_TEXT: Record<RiskLevel, string> = {
-  info: 'text-secondary',
-  warn: 'text-warning',
-  danger: 'text-danger',
+
+const CHAIN_NAMES: Record<number, string> = {
+  1: 'Ethereum Mainnet',
+  5: 'Goerli',
+  11155111: 'Sepolia',
+  137: 'Polygon',
+  10: 'Optimism',
+  42161: 'Arbitrum One',
+};
+
+const METHOD_LABELS: Record<string, string> = {
+  eth_signTransaction: 'Transaction',
+  personal_sign: 'Personal Sign',
+  eth_sign: 'Eth Sign',
+  eth_signTypedData_v3: 'Typed Data (v3)',
+  eth_signTypedData_v4: 'Typed Data (v4)',
 };
 
 /**
- * The clear-signing screen — the demo centerpiece. When MetaMask parks a signing
- * request, this shows, in plain English, exactly what the card is about to sign,
- * with risk flags, BEFORE the tap. This is what AirGap/Keycard/Tangem don't do.
+ * Resolve a preview + clear-sign result from a request.
  */
-const ClearSignPanel: FunctionComponent<{
-  request?: KeyringRequest | undefined;
-  busy: boolean;
-  onApprove: (request: KeyringRequest) => void;
-  onReject: (request: KeyringRequest) => void;
-}> = ({ request, busy, onApprove, onReject }) => {
-  if (!request) {
-    return null;
-  }
-
+function resolvePreview(request: KeyringRequest): {
+  preview: RequestPreview;
+  summary: string;
+  flags: RiskFlag[];
+  worst: RiskLevel;
+} {
   const preview = previewRequest(request);
   let summary: string;
-  let flags: { level: RiskLevel; message: string }[] = [];
+  let flags: RiskFlag[] = [];
   let worst: RiskLevel = 'info';
 
   if (preview.kind === 'tx') {
@@ -442,47 +584,331 @@ const ClearSignPanel: FunctionComponent<{
     summary = result.summary;
     flags = result.flags;
     worst = result.worstLevel;
+  } else if (preview.kind === 'typedData') {
+    const result = clearSignTypedData(
+      preview.domain,
+      preview.primaryType,
+      preview.message,
+      new Set(),
+    );
+    summary = result.summary;
+    flags = result.flags;
+    worst = result.worstLevel;
   } else if (preview.kind === 'message') {
-    summary = `Sign this message: “${preview.text}”`;
+    summary = `Sign this message: "${preview.text.length > 120 ? preview.text.slice(0, 120) + '…' : preview.text}"`;
   } else {
     summary = `Approve request: ${preview.method}`;
   }
 
+  return { preview, summary, flags, worst };
+}
+
+/**
+ * The premium clear-signing screen — the demo centerpiece.
+ *
+ * Dark glassmorphism panel with risk-level color coding, monospaced addresses,
+ * transaction/typed-data details, and pulsing "tap card" button.
+ */
+const ClearSignPanel: FunctionComponent<{
+  request?: KeyringRequest | undefined;
+  busy: boolean;
+  onApprove: (request: KeyringRequest) => void;
+  onReject: (request: KeyringRequest) => void;
+  origin?: string | undefined;
+}> = ({ request, busy, onApprove, onReject, origin }) => {
+  if (!request) {
+    return (
+      <div className="cs-panel">
+        <div className="cs-empty">
+          <div className="cs-empty__icon">🔐</div>
+          <p className="cs-empty__text">
+            No pending signing requests.
+            <br />
+            Trigger one from a dapp or use demo mode.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const { preview, summary, flags, worst } = resolvePreview(request);
+  const methodLabel =
+    METHOD_LABELS[preview.method] ?? preview.method;
+
   return (
-    <div className="card border-2 mb-3" data-testid="ClearSignPanel">
-      <div className={`card-header text-white ${RISK_BG[worst]}`}>
-        <strong>Review &amp; tap your card to sign</strong>
-        <span className="badge bg-light text-dark float-end">
-          {worst.toUpperCase()}
+    <div className="cs-panel" data-testid="ClearSignPanel">
+      {/* ── Header ── */}
+      <div className={`cs-header cs-header--${worst}`}>
+        <h3 className="cs-header__title">Review &amp; Sign</h3>
+        <span className={`cs-badge cs-badge--${worst}`}>
+          <span className="cs-badge__dot" />
+          {worst === 'info' ? 'SAFE' : worst.toUpperCase()}
         </span>
       </div>
-      <div className="card-body">
-        <p className="fs-5 fw-semibold mb-2">{summary}</p>
-        {flags.map((flag, index) => (
-          <div key={index} className={RISK_TEXT[flag.level]}>
-            • {flag.message}
+
+      {/* ── Origin ── */}
+      {origin && (
+        <div className="cs-origin">
+          <span className="cs-origin__label">From</span>
+          <span className="cs-origin__value">{origin}</span>
+        </div>
+      )}
+
+      <div className="cs-body">
+        {/* ── Method badge ── */}
+        <div className="cs-method">{methodLabel}</div>
+
+        {/* ── Summary ── */}
+        <p className="cs-summary">{summary}</p>
+
+        {/* ── Risk flags ── */}
+        {flags.length > 0 && (
+          <div className="cs-flags">
+            {flags.map((flag, index) => (
+              <div key={index} className={`cs-flag cs-flag--${flag.level}`}>
+                <span className="cs-flag__icon">
+                  {FLAG_ICON[flag.level]}
+                </span>
+                <span>{flag.message}</span>
+              </div>
+            ))}
           </div>
-        ))}
-        <div className="d-flex gap-2 mt-3">
+        )}
+
+        {/* ── Transaction details ── */}
+        {preview.kind === 'tx' && (
+          <div className="cs-details">
+            {preview.tx.to && (
+              <div className="cs-detail-row">
+                <span className="cs-detail-row__label">To</span>
+                <span className="cs-detail-row__value">
+                  {short(preview.tx.to)}
+                </span>
+              </div>
+            )}
+            <div className="cs-detail-row">
+              <span className="cs-detail-row__label">Value</span>
+              <span className="cs-detail-row__value">
+                {preview.tx.valueWei === 0n
+                  ? '0 ETH'
+                  : `${(Number(preview.tx.valueWei) / 1e18).toFixed(6)} ETH`}
+              </span>
+            </div>
+            <div className="cs-detail-row">
+              <span className="cs-detail-row__label">Chain</span>
+              <span className="cs-detail-row__value">
+                {CHAIN_NAMES[preview.tx.chainId] ??
+                  `Chain ${preview.tx.chainId}`}
+              </span>
+            </div>
+            {preview.tx.data !== '0x' && (
+              <div className="cs-detail-row">
+                <span className="cs-detail-row__label">Data</span>
+                <span className="cs-detail-row__value">
+                  {preview.tx.data.length > 20
+                    ? `${preview.tx.data.slice(0, 10)}…${preview.tx.data.slice(-8)} (${Math.floor((preview.tx.data.length - 2) / 2)} bytes)`
+                    : preview.tx.data}
+                </span>
+              </div>
+            )}
+            <div className="cs-detail-row">
+              <span className="cs-detail-row__label">From</span>
+              <span className="cs-detail-row__value">
+                {short(preview.from)}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* ── Typed data details ── */}
+        {preview.kind === 'typedData' && (
+          <div className="cs-typed-data">
+            <h4 className="cs-typed-data__header">
+              {preview.primaryType} — {preview.domain.name ?? 'Unknown dApp'}
+            </h4>
+            {preview.domain.verifyingContract && (
+              <div className="cs-typed-data__field">
+                <span className="cs-typed-data__key">Contract</span>
+                <span className="cs-typed-data__val">
+                  {short(preview.domain.verifyingContract)}
+                </span>
+              </div>
+            )}
+            {preview.domain.chainId !== undefined && (
+              <div className="cs-typed-data__field">
+                <span className="cs-typed-data__key">Chain</span>
+                <span className="cs-typed-data__val">
+                  {CHAIN_NAMES[preview.domain.chainId] ??
+                    `Chain ${preview.domain.chainId}`}
+                </span>
+              </div>
+            )}
+            {Object.entries(preview.message).map(([key, val]) => (
+              <div key={key} className="cs-typed-data__field">
+                <span className="cs-typed-data__key">{key}</span>
+                <span className="cs-typed-data__val">
+                  {typeof val === 'string' && val.length > 30
+                    ? short(val)
+                    : String(val)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── Message details ── */}
+        {preview.kind === 'message' && (
+          <div className="cs-details">
+            <div className="cs-detail-row">
+              <span className="cs-detail-row__label">From</span>
+              <span className="cs-detail-row__value">
+                {short(preview.from)}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* ── Action buttons ── */}
+        <div className="cs-actions">
           <button
             type="button"
-            className={`btn ${worst === 'danger' ? 'btn-danger' : 'btn-primary'}`}
+            className={`cs-btn ${
+              worst === 'danger'
+                ? 'cs-btn--approve-danger'
+                : 'cs-btn--approve'
+            } ${busy ? 'cs-btn--busy' : ''}`}
             disabled={busy}
             onClick={() => onApprove(request)}
           >
-            {busy ? 'Signing on card…' : '📇 Tap card to approve'}
+            <span className="cs-card-icon">📇</span>
+            {busy ? 'Signing on card…' : 'Tap card to approve'}
           </button>
           <button
             type="button"
-            className="btn btn-outline-secondary"
+            className="cs-btn cs-btn--reject"
             disabled={busy}
             onClick={() => onReject(request)}
           >
             Reject
           </button>
         </div>
-        <p className="text-muted small mb-0 mt-2">
+      </div>
+
+      {/* ── Footer ── */}
+      <div className="cs-footer">
+        <p className="cs-footer__text">
+          <span className="cs-footer__lock">🔒</span>
           The signing key lives on the card — never on this computer.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Demo mode: shows a scenario picker and renders the clear-sign panel
+ * in a phone-style dark container — the demo video hero shot.
+ */
+const DemoView: FunctionComponent = () => {
+  const [scenarioIndex, setScenarioIndex] = useState(0);
+  const scenario = DEMO_SCENARIOS[scenarioIndex];
+
+  return (
+    <div className="cs-page">
+      <div style={{ width: '100%', maxWidth: '480px' }}>
+        <div className="cs-demo-bar">
+          {DEMO_SCENARIOS.map((s, i) => (
+            <button
+              key={s.label}
+              type="button"
+              className={`cs-demo-btn ${
+                i === scenarioIndex ? 'cs-demo-btn--active' : ''
+              }`}
+              onClick={() => setScenarioIndex(i)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+        <ClearSignPanel
+          request={scenario?.request}
+          busy={false}
+          onApprove={() =>
+            alert('In a real flow, this would tap the card and sign.')
+          }
+          onReject={() =>
+            alert('Request rejected.')
+          }
+          origin={
+            (scenario?.request as any)?.origin ?? 'https://example.com'
+          }
+        />
+      </div>
+    </div>
+  );
+};
+
+/**
+ * MFKDF factor entry: the password ("something you know") + the NFC card id
+ * ("something you have"). The key is derived from both, used, and wiped — never
+ * stored. Hidden in sim/halo modes (those don't use derived factors).
+ */
+const CredentialsPanel: FunctionComponent<{
+  password: string;
+  onPassword: (value: string) => void;
+  cardId: string;
+  onCardId: (value: string) => void;
+  onReadCard: () => void;
+  isReadingCard: boolean;
+}> = ({
+  password,
+  onPassword,
+  cardId,
+  onCardId,
+  onReadCard,
+  isReadingCard,
+}) => {
+  if (CARD_MODE !== 'mfkdf') {
+    return null;
+  }
+  return (
+    <div className="card mb-3" data-testid="CredentialsPanel">
+      <div className="card-header">🔑 Your card + password</div>
+      <div className="card-body">
+        <div className="row g-2">
+          <div className="col-12 col-md-5">
+            <input
+              type="password"
+              className="form-control"
+              placeholder="Password (never stored)"
+              value={password}
+              onChange={(event) => onPassword(event.target.value)}
+            />
+          </div>
+          <div className="col-8 col-md-5">
+            <input
+              type="text"
+              className="form-control"
+              placeholder="Card ID (tap to fill)"
+              value={cardId}
+              onChange={(event) => onCardId(event.target.value)}
+            />
+          </div>
+          <div className="col-4 col-md-2 d-grid">
+            <button
+              type="button"
+              className="btn btn-outline-primary"
+              onClick={onReadCard}
+              disabled={isReadingCard}
+            >
+              {isReadingCard ? 'Tap now…' : '📇 Tap card'}
+            </button>
+          </div>
+        </div>
+        <p className="small text-muted mb-0 mt-2">
+          Your key is derived from these two, used to sign, then wiped — never
+          stored on this machine or in MetaMask. On desktop (no NFC) type any card
+          id; on Android, tap a real NFC card.
         </p>
       </div>
     </div>
@@ -499,6 +925,14 @@ export const App: FunctionComponent = () => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isTogglingSync, setIsTogglingSync] = useState(false);
   const [isSigning, setIsSigning] = useState(false);
+  const [mfkdfPassword, setMfkdfPassword] = useState('');
+  const [cardId, setCardId] = useState('');
+  const [isReadingCard, setIsReadingCard] = useState(false);
+
+  // ── Demo mode ──────────────────────────────────────────────────────────────
+  if (isDemoMode()) {
+    return <DemoView />;
+  }
 
   const handleError = useCallback(
     (error: unknown) => {
@@ -593,9 +1027,29 @@ export const App: FunctionComponent = () => {
     }
   };
 
+  // Build the active signer. For MFKDF (default) it derives from the live
+  // password + card id; those factors are validated inside MfkdfCard.
+  const buildSigner = useCallback((): CardSigner => {
+    return (
+      staticSigner() ??
+      new MfkdfCard({ cardId, password: mfkdfPassword, label: 'NFC Card' })
+    );
+  }, [cardId, mfkdfPassword]);
+
+  const handleReadCard = useCallback(async () => {
+    setIsReadingCard(true);
+    try {
+      setCardId(await readNfcCardId());
+    } catch (error) {
+      handleError(error);
+    } finally {
+      setIsReadingCard(false);
+    }
+  }, [handleError]);
+
   const createAccount = async () => {
-    // Tap the card to read its public identity; the snap stores no private key.
-    const identity = await card.getIdentity();
+    // Derive the card's public identity; the snap stores NO private key.
+    const identity = await buildSigner().getIdentity();
     const newAccount = await getClient().createAccount({
       address: identity.address,
       publicKey: identity.publicKey,
@@ -611,7 +1065,7 @@ export const App: FunctionComponent = () => {
       try {
         // Sign on the card in the companion dapp, then hand the finished
         // signature to the snap — which only relays it (it cannot sign itself).
-        const signature = await signRequestWithCard(request, card);
+        const signature = await signRequestWithCard(request, buildSigner());
         await getClient().approveRequest(request.id, { signature });
         await syncRequests();
       } catch (error) {
@@ -620,7 +1074,7 @@ export const App: FunctionComponent = () => {
         setIsSigning(false);
       }
     },
-    [handleError, syncRequests],
+    [buildSigner, handleError, syncRequests],
   );
 
   const rejectRequestByObject = useCallback(
@@ -853,6 +1307,9 @@ export const App: FunctionComponent = () => {
     },
   ];
 
+  // Pick the first pending request for the clear-sign hero panel.
+  const activeRequest = snapState.pendingRequests[0];
+
   return (
     <main className="container-fluid py-3">
       <div className="alert alert-danger" role="alert">
@@ -869,12 +1326,36 @@ export const App: FunctionComponent = () => {
           {state.error.message}
         </div>
       )}
-      <ClearSignPanel
-        request={isDemoMode() ? DEMO_REQUEST : snapState.pendingRequests[0]}
-        busy={isSigning}
-        onApprove={approveWithCard}
-        onReject={rejectRequestByObject}
+
+      <CredentialsPanel
+        password={mfkdfPassword}
+        onPassword={setMfkdfPassword}
+        cardId={cardId}
+        onCardId={setCardId}
+        onReadCard={handleReadCard}
+        isReadingCard={isReadingCard}
       />
+
+      {/* ── Premium clear-sign panel ── */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        padding: '16px 0 24px',
+        background: snapState.pendingRequests.length > 0
+          ? 'linear-gradient(180deg, #0c0e14 0%, transparent 100%)'
+          : undefined,
+        borderRadius: '16px',
+        marginBottom: '16px',
+      }}>
+        <ClearSignPanel
+          request={activeRequest}
+          busy={isSigning}
+          onApprove={approveWithCard}
+          onReject={rejectRequestByObject}
+          origin={(activeRequest as any)?.origin}
+        />
+      </div>
+
       <div className="row gx-3 gy-3 row-cols-1 row-cols-sm-2 row-cols-lg-3">
         <SnapConnection
           hasMetaMask={state.hasMetaMask}

@@ -71,6 +71,8 @@
     "webpack-dev-server": "^4.6.0"
   },
   "dependencies": {
-    "ethers": "^6.13.0"
+    "@arx-research/libhalo": "^1.20.0",
+    "ethers": "^6.13.0",
+    "hash-wasm": "^4.11.0"
   }
 }

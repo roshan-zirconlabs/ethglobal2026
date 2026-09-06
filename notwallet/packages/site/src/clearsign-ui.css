@@ -1,0 +1,557 @@
+/* ── NotWallet Clear-Sign UI ─────────────────────────────────────────
+ * Premium dark-mode review screen — the demo centerpiece.
+ * Designed to look like a hardware wallet's confirmation screen
+ * rendered on a phone. Glassmorphism, smooth animations, risk-color
+ * coding, monospaced addresses.
+ * ─────────────────────────────────────────────────────────────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ── CSS custom properties ──────────────────────────────────────── */
+:root {
+  --cs-bg: #0c0e14;
+  --cs-surface: rgba(22, 27, 40, 0.85);
+  --cs-surface-solid: #161b28;
+  --cs-border: rgba(255, 255, 255, 0.06);
+  --cs-border-hover: rgba(255, 255, 255, 0.12);
+  --cs-text: #e8eaf0;
+  --cs-text-muted: #8b92a5;
+  --cs-text-dim: #5a6175;
+
+  /* Risk palette */
+  --cs-safe: #22c55e;
+  --cs-safe-bg: rgba(34, 197, 94, 0.08);
+  --cs-safe-border: rgba(34, 197, 94, 0.2);
+  --cs-warn: #f59e0b;
+  --cs-warn-bg: rgba(245, 158, 11, 0.08);
+  --cs-warn-border: rgba(245, 158, 11, 0.2);
+  --cs-danger: #ef4444;
+  --cs-danger-bg: rgba(239, 68, 68, 0.08);
+  --cs-danger-border: rgba(239, 68, 68, 0.2);
+
+  /* Accent */
+  --cs-accent: #818cf8;
+  --cs-accent-hover: #6366f1;
+
+  /* Spacing */
+  --cs-radius: 16px;
+  --cs-radius-sm: 10px;
+  --cs-radius-xs: 6px;
+}
+
+/* ── Animations ─────────────────────────────────────────────────── */
+@keyframes cs-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes cs-pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 var(--pulse-color, rgba(129, 140, 248, 0.3)); }
+  50% { box-shadow: 0 0 20px 6px var(--pulse-color, rgba(129, 140, 248, 0.15)); }
+}
+
+@keyframes cs-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes cs-card-icon-bounce {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50% { transform: translateY(-4px) rotate(2deg); }
+}
+
+@keyframes cs-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── Full-page wrapper (when in demo / standalone mode) ─────────── */
+.cs-page {
+  min-height: 100vh;
+  background: var(--cs-bg);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 32px 16px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* ── The card container ─────────────────────────────────────────── */
+.cs-panel {
+  width: 100%;
+  max-width: 440px;
+  background: var(--cs-surface);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius);
+  overflow: hidden;
+  animation: cs-slide-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+}
+
+/* ── Header with risk-level accent ──────────────────────────────── */
+.cs-header {
+  position: relative;
+  padding: 20px 24px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.cs-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 0 0 4px 4px;
+}
+
+.cs-header--info::before { background: linear-gradient(90deg, var(--cs-safe), var(--cs-accent)); }
+.cs-header--warn::before { background: linear-gradient(90deg, var(--cs-warn), #fb923c); }
+.cs-header--danger::before { background: linear-gradient(90deg, var(--cs-danger), #f97316); }
+
+.cs-header__title {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--cs-text-muted);
+  margin: 0;
+}
+
+.cs-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 10px;
+  border-radius: 100px;
+}
+.cs-badge--info {
+  color: var(--cs-safe);
+  background: var(--cs-safe-bg);
+  border: 1px solid var(--cs-safe-border);
+}
+.cs-badge--warn {
+  color: var(--cs-warn);
+  background: var(--cs-warn-bg);
+  border: 1px solid var(--cs-warn-border);
+}
+.cs-badge--danger {
+  color: var(--cs-danger);
+  background: var(--cs-danger-bg);
+  border: 1px solid var(--cs-danger-border);
+}
+
+.cs-badge__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* ── Body ───────────────────────────────────────────────────────── */
+.cs-body {
+  padding: 0 24px 20px;
+}
+
+/* Summary sentence */
+.cs-summary {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--cs-text);
+  margin: 0 0 16px;
+}
+
+/* ── Risk flags ─────────────────────────────────────────────────── */
+.cs-flags {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.cs-flag {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--cs-radius-sm);
+  font-size: 13px;
+  line-height: 1.5;
+  animation: cs-fade-in 0.3s ease forwards;
+}
+
+.cs-flag--info {
+  background: var(--cs-safe-bg);
+  border: 1px solid var(--cs-safe-border);
+  color: var(--cs-safe);
+}
+.cs-flag--warn {
+  background: var(--cs-warn-bg);
+  border: 1px solid var(--cs-warn-border);
+  color: var(--cs-warn);
+}
+.cs-flag--danger {
+  background: var(--cs-danger-bg);
+  border: 1px solid var(--cs-danger-border);
+  color: var(--cs-danger);
+}
+
+.cs-flag__icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ── Transaction details ────────────────────────────────────────── */
+.cs-details {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-sm);
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+
+.cs-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 6px 0;
+}
+
+.cs-detail-row + .cs-detail-row {
+  border-top: 1px solid var(--cs-border);
+}
+
+.cs-detail-row__label {
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--cs-text-dim);
+  flex-shrink: 0;
+}
+
+.cs-detail-row__value {
+  font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--cs-text);
+  text-align: right;
+  word-break: break-all;
+  max-width: 65%;
+}
+
+/* ── Typed data section ─────────────────────────────────────────── */
+.cs-typed-data {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-sm);
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+
+.cs-typed-data__header {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--cs-accent);
+  margin: 0 0 10px;
+}
+
+.cs-typed-data__field {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 4px 0;
+  gap: 12px;
+}
+
+.cs-typed-data__field + .cs-typed-data__field {
+  border-top: 1px solid var(--cs-border);
+}
+
+.cs-typed-data__key {
+  font-size: 12px;
+  color: var(--cs-text-muted);
+  flex-shrink: 0;
+}
+
+.cs-typed-data__val {
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-size: 12px;
+  color: var(--cs-text);
+  text-align: right;
+  word-break: break-all;
+  max-width: 70%;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────── */
+.cs-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.cs-btn {
+  flex: 1;
+  padding: 14px 20px;
+  border-radius: var(--cs-radius-sm);
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.cs-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Approve button */
+.cs-btn--approve {
+  background: linear-gradient(135deg, var(--cs-accent), #6366f1);
+  color: #fff;
+  --pulse-color: rgba(129, 140, 248, 0.3);
+  animation: cs-pulse-glow 2.5s ease-in-out infinite;
+}
+.cs-btn--approve:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--cs-accent-hover), #4f46e5);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.3);
+}
+.cs-btn--approve:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* Danger-level approve button */
+.cs-btn--approve-danger {
+  background: linear-gradient(135deg, var(--cs-danger), #dc2626);
+  --pulse-color: rgba(239, 68, 68, 0.3);
+}
+.cs-btn--approve-danger:hover:not(:disabled) {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  box-shadow: 0 8px 24px rgba(239, 68, 68, 0.3);
+}
+
+/* Reject button */
+.cs-btn--reject {
+  background: transparent;
+  color: var(--cs-text-muted);
+  border: 1px solid var(--cs-border);
+}
+.cs-btn--reject:hover:not(:disabled) {
+  color: var(--cs-text);
+  border-color: var(--cs-border-hover);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* Busy shimmer overlay */
+.cs-btn--busy::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.08),
+    transparent
+  );
+  background-size: 200% 100%;
+  animation: cs-shimmer 1.5s linear infinite;
+}
+
+/* ── Card icon ──────────────────────────────────────────────────── */
+.cs-card-icon {
+  display: inline-flex;
+  font-size: 20px;
+  animation: cs-card-icon-bounce 2s ease-in-out infinite;
+  margin-right: 6px;
+}
+
+/* ── Footer ─────────────────────────────────────────────────────── */
+.cs-footer {
+  padding: 0 24px 20px;
+}
+
+.cs-footer__text {
+  font-size: 12px;
+  color: var(--cs-text-dim);
+  text-align: center;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.cs-footer__lock {
+  font-size: 14px;
+}
+
+/* ── Origin / dapp info ─────────────────────────────────────────── */
+.cs-origin {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-top: 1px solid var(--cs-border);
+  border-bottom: 1px solid var(--cs-border);
+  margin-bottom: 16px;
+}
+
+.cs-origin__label {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--cs-text-dim);
+}
+
+.cs-origin__value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--cs-text-muted);
+}
+
+/* ── Method badge ───────────────────────────────────────────────── */
+.cs-method {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: var(--cs-radius-xs);
+  background: rgba(129, 140, 248, 0.08);
+  border: 1px solid rgba(129, 140, 248, 0.15);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--cs-accent);
+  margin-bottom: 12px;
+}
+
+/* ── Demo mode toggle bar ───────────────────────────────────────── */
+.cs-demo-bar {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  padding: 16px;
+  flex-wrap: wrap;
+}
+
+.cs-demo-btn {
+  padding: 6px 14px;
+  border-radius: 100px;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--cs-border);
+  background: transparent;
+  color: var(--cs-text-muted);
+  transition: all 0.15s ease;
+}
+
+.cs-demo-btn:hover {
+  border-color: var(--cs-accent);
+  color: var(--cs-accent);
+}
+
+.cs-demo-btn--active {
+  background: rgba(129, 140, 248, 0.12);
+  border-color: var(--cs-accent);
+  color: var(--cs-accent);
+}
+
+/* ── Pending requests list ──────────────────────────────────────── */
+.cs-pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 24px 20px;
+}
+
+.cs-pending-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cs-pending-item:hover {
+  border-color: var(--cs-border-hover);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.cs-pending-item__method {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--cs-accent);
+}
+
+.cs-pending-item__id {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--cs-text-dim);
+}
+
+/* ── Empty state ────────────────────────────────────────────────── */
+.cs-empty {
+  text-align: center;
+  padding: 48px 24px;
+}
+
+.cs-empty__icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.3;
+}
+
+.cs-empty__text {
+  font-size: 14px;
+  color: var(--cs-text-dim);
+  margin: 0;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .cs-panel {
+    border-radius: var(--cs-radius-sm);
+  }
+  .cs-header,
+  .cs-body,
+  .cs-footer {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .cs-summary {
+    font-size: 15px;
+  }
+}

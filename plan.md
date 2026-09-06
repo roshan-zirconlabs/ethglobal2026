@@ -77,13 +77,16 @@ through a MetaMask Snap and, later, through multi-factor derivation.
 
 | Area | File(s) | Status |
 |---|---|---|
-| **Keyless card-backed snap** | `notwallet/packages/snap/src/keyring.ts` | ✅ Rewrote MetaMask's Simple Keyring so it stores **no private key** (only `address`/`publicKey`/`cardLabel`), is **always async**, and `approveRequest(id, {signature})` **relays** the card's signature. `mm-snap build` passes. |
+| **Keyless card-backed snap** | `packages/snap/src/keyring.ts` | ✅ Rewrote MetaMask's Simple Keyring so it stores **no private key** (only `address`/`publicKey`/`cardLabel`), is **always async**, and `approveRequest(id, {signature})` **relays** the card's signature. `mm-snap build` passes. |
 | **Snap wiring/rename** | `packages/snap/src/index.ts` | ✅ `SimpleKeyring` → `CardKeyring`. |
-| **Keyring can be driven locally** | `packages/snap/snap.manifest.json` | ✅ Added `http://localhost:8000` to `endowment:keyring.allowedOrigins`. |
-| **Card signer** | `packages/site/src/card.ts` | ✅ `CardSigner` interface + `SimulatedCard` (ethers, browser-safe). Real HaLo/enclave drop in behind the same interface. |
-| **Request signing** | `packages/site/src/signing.ts` | ✅ `previewRequest()` (for the screen) + `signRequestWithCard()` for `eth_signTransaction`, `personal_sign`, `eth_sign`, with a recovered-signer safety check. Typed-data = TODO. |
-| **Clear-signing engine** | `packages/site/src/clearsign.ts` | ✅ Rules pass: infinite approval, `setApprovalForAll`, new-counterparty, ETH transfer summary. Offline, auditable. |
-| **Companion dapp wiring** | `packages/site/src/App.tsx` | ✅ `createAccount` taps card; `ClearSignPanel` (the review screen); `approveWithCard`; `?demo=1` sample request; old "Approve Request" button routed through the card. |
+| **Snap branding** | `packages/snap/snap.manifest.json` | ✅ Renamed to "NotWallet" with proper description. `http://localhost:8000` in `allowedOrigins`. |
+| **Redirect origin fix** | `packages/snap/src/keyring.ts` | ✅ `#getCompanionUrl()` hardcoded `localhost:8000` fallback in dev — redirect always lands on the companion dapp. |
+| **Card signer (simulated)** | `packages/site/src/card.ts` | ✅ `CardSigner` interface + `SimulatedCard` (ethers, browser-safe). |
+| **Card signer (real NFC)** | `packages/site/src/card-halo.ts` | ✅ `HaloCard implements CardSigner` using `@arx-research/libhalo` (WebNFC). Dynamic import; activate with `?card=halo`. Key **never** leaves the chip. |
+| **Request signing** | `packages/site/src/signing.ts` | ✅ `previewRequest()` + `signRequestWithCard()` for `eth_signTransaction`, `personal_sign`, `eth_sign`, **`eth_signTypedData_v3/v4`** (EIP-712), with recovered-signer safety checks. |
+| **Clear-signing engine** | `packages/site/src/clearsign.ts` | ✅ **Tx rules:** infinite approval, `setApprovalForAll`, new-counterparty, ETH transfer summary. **Typed-data rules:** ERC-2612 Permit, Permit2, Seaport orders, generic approval keywords. Offline, auditable. |
+| **Companion dapp wiring** | `packages/site/src/App.tsx` | ✅ `createAccount` taps card; **premium dark clear-sign panel** (glassmorphism, Inter/JetBrains Mono, risk-color coding, animations); `approveWithCard`; `?demo=1` with **4 scenario picker** (infinite approval, ETH transfer, ERC-2612 Permit, personal sign); `?card=halo` for real NFC. |
+| **Clear-sign UI** | `packages/site/src/clearsign-ui.css` | ✅ Phone-style dark glassmorphism review screen with slide-in animation, pulsing approve button, risk flags, tx/typed-data detail rows. |
 | **Crypto correctness** | (round-trip test, not committed) | ✅ `personal_sign` and EIP-1559 tx both recover to the card address. |
 | **Runs in real Flask** | — | ✅ Snap installs; **card-backed account creation works in Flask** (verified: returns an account with `publicKey` and **no private key**). |
 
@@ -93,23 +96,24 @@ address and public key only.
 
 ## 5. What's LEFT ⏳ (in priority order)
 
-1. **Finish the live signing round-trip in Flask** *(in progress).*
+1. **Finish the live signing round-trip in Flask** *(ready to test — code path complete).*
    - `personal_sign`: approve via the **clear-sign panel** → confirm the dapp
-     receives a valid signature (recovers to the card address). *(Blocker just
-     fixed: must approve via the card path, not the old no-signature button.)*
+     receives a valid signature (recovers to the card address).
    - Then `eth_signTransaction` on **Sepolia**: fund the card account, send a tx,
      confirm broadcast. Watch for result-shape issues MetaMask may reject.
-2. **Fix the redirect origin** so the async flow lands on `localhost:8000` in dev
-   (currently an installed *production* bundle redirects to the github.io URL).
-   Reinstall the snap after a dev build; consider hardcoding the dev origin.
-3. **Typed-data signing** (`eth_signTypedData_v3/v4`) in `signing.ts` (EIP-712)
-   + clear-signing for typed data.
-4. **Real card via WebNFC** — a `HaloCard implements CardSigner` using `libhalo`
-   (Arx HaLo chip) on Android Chrome. Needs a chip (~a few $) + an Android phone.
+   - Then `eth_signTypedData_v4`: trigger a typed-data sign, confirm the clear-sign
+     panel shows the Permit/typed-data details and signature succeeds.
+2. ~~**Fix the redirect origin**~~ ✅ Done. `#getCompanionUrl()` now falls back to
+   `localhost:8000` in dev. Reinstall after dev build.
+3. ~~**Typed-data signing**~~ ✅ Done. `eth_signTypedData_v3/v4` in `signing.ts` +
+   `clearSignTypedData()` in `clearsign.ts` (Permit, Permit2, Seaport detection).
+4. ~~**Real card via WebNFC**~~ ✅ Code done. `HaloCard` in `card-halo.ts` using
+   `@arx-research/libhalo`. Activate with `?card=halo`. **Needs a real chip to test.**
 5. **Phone secure-enclave signer** — alternative `CardSigner` using the phone's
    secure element (see §6 for the secp256k1 caveat).
 6. **Multi-card / MFKDF** (the Tangem-style concern) — see §6.
-7. **Polished phone-style clear-sign UI** (right now it lives in the dev dashboard).
+7. ~~**Polished phone-style clear-sign UI**~~ ✅ Done. Premium dark glassmorphism
+   panel with 4 demo scenarios. `?demo=1` for the demo video.
 8. **Demo video** (2–4 min, before→after) + submission for ETHOnline.
 9. **Housekeeping:** address lint/depcheck; decide production distribution story
    (account snaps can't be listed yet — self-install via Flask; see idea.md §7).
@@ -235,13 +239,28 @@ approval drainer. Good for the demo video.
   the keyring (`endowment:keyring.allowedOrigins`).
 - *(pending)* fix(site): route the dashboard "Approve Request" button through the
   card so it can't call the snap without a signature.
+- *(pending)* fix(snap): harden `#getCompanionUrl()` with `localhost:8000` fallback;
+  rebrand snap manifest to "NotWallet".
+- *(pending)* feat(site): EIP-712 typed-data signing (`eth_signTypedData_v3/v4`)
+  in `signing.ts`; `clearSignTypedData()` in `clearsign.ts` with ERC-2612 Permit,
+  Permit2, Seaport detection.
+- *(pending)* feat(site): `HaloCard` implementation (`card-halo.ts`) — real Arx
+  HaLo NFC chip signer via `@arx-research/libhalo` WebNFC. Activate with
+  `?card=halo`. Key never leaves the chip.
+- *(pending)* feat(site): premium dark glassmorphism clear-sign UI
+  (`clearsign-ui.css`). Rebuilt `ClearSignPanel` with 4 demo scenarios
+  (infinite approval, ETH transfer, ERC-2612 Permit, personal sign),
+  transaction/typed-data detail views, risk-color coding, animations.
 
 **Summary of what the code does now:** MetaMask (Flask) gets a custom EOA account
-backed by an offline card. The snap holds only public data and cannot sign. Any
-signing request is parked and handed to the companion dapp, which clear-signs it
-(plain English + risk flags), has the (currently simulated) card sign the exact
-digest, and relays the signature back. Verified through account creation in real
-Flask; live `personal_sign`/tx round-trip is the current step.
+backed by an offline card (simulated or real HaLo NFC). The snap holds only
+public data and cannot sign. Any signing request — transactions, messages, AND
+EIP-712 typed data — is parked and handed to the companion dapp, which
+clear-signs it (plain English + risk flags for Permit/Permit2/Seaport phishing),
+has the card sign the exact digest, and relays the signature back. A polished
+dark-mode review screen is the demo centerpiece (`?demo=1` with 4 scenarios).
+Verified through account creation in real Flask; live round-trip is the next
+manual test step.
 
 ## 10. Paste-ready brief for another AI tool
 
@@ -251,15 +270,18 @@ Flask; live `personal_sign`/tx round-trip is the current step.
 > **MetaMask Flask**). **Invariant: the private key must never be in the snap or
 > on the host.** The snap stores only `address`/`publicKey`/`cardLabel`, is
 > always-async, and `approveRequest(id, {signature})` just relays a signature. A
-> `CardSigner` interface (`packages/site/src/card.ts`) does the signing — today a
-> `SimulatedCard` (ethers), later a real HaLo NFC chip (WebNFC) or phone secure
-> enclave. `signing.ts` builds the exact result MetaMask expects for
-> `eth_signTransaction`/`personal_sign`/`eth_sign` from the card's signature;
-> `clearsign.ts` produces a plain-English + risk-flag preview shown before
-> approval. **Use ethers, not @ethereumjs (webpack has node polyfills off).**
-> Current step: confirm the live `personal_sign` round-trip in Flask, then a
-> Sepolia tx. Next: typed-data, real HaLo card, and multi-factor key derivation
-> (MFKDF2) / ERC-4337 2-of-2 so "1–2 cards, both required" works without ever
-> putting a key on MetaMask. See `plan.md` §5/§6 for the full roadmap.
+> `CardSigner` interface (`packages/site/src/card.ts`) does the signing —
+> `SimulatedCard` (ethers, dev) or `HaloCard` (`card-halo.ts`, real Arx NFC chip
+> via `@arx-research/libhalo` WebNFC; activate with `?card=halo`). `signing.ts`
+> builds the exact result MetaMask expects for `eth_signTransaction`,
+> `personal_sign`, `eth_sign`, AND `eth_signTypedData_v3/v4` (EIP-712) from the
+> card's signature; `clearsign.ts` produces a plain-English + risk-flag preview
+> (detects ERC-2612 Permit, Permit2, Seaport phishing) shown before approval on
+> a premium dark glassmorphism UI (`clearsign-ui.css`). **Use ethers, not
+> @ethereumjs (webpack has node polyfills off).** Current step: manually test the
+> live signing round-trip in Flask (`personal_sign` → `eth_signTransaction` on
+> Sepolia → `eth_signTypedData_v4`). Next: phone secure enclave signer, MFKDF2
+> multi-factor key derivation / ERC-4337 2-of-2 multisig, and the demo video.
+> See `plan.md` §5/§6 for the full roadmap.
 >
 > **My question for you:** [ask your specific question here].

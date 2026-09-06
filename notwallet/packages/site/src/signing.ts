@@ -10,6 +10,7 @@
 import {
   Signature,
   Transaction,
+  TypedDataEncoder,
   getBytes,
   hashMessage,
   recoverAddress,
@@ -23,12 +24,57 @@ import type { DecodedTx } from './clearsign';
 export type RequestPreview =
   | { kind: 'tx'; method: string; tx: DecodedTx; from: string }
   | { kind: 'message'; method: string; text: string; from: string }
+  | {
+      kind: 'typedData';
+      method: string;
+      domain: TypedDataDomain;
+      primaryType: string;
+      message: Record<string, unknown>;
+      types: Record<string, { name: string; type: string }[]>;
+      from: string;
+    }
   | { kind: 'unknown'; method: string };
+
+export type TypedDataDomain = {
+  name?: string | undefined;
+  version?: string | undefined;
+  chainId?: number | undefined;
+  verifyingContract?: string | undefined;
+};
 
 type RpcLike = { method: string; params?: unknown };
 
 function getRpc(request: KeyringRequest): RpcLike {
   return request.request as unknown as RpcLike;
+}
+
+/**
+ * Parse the EIP-712 typed data payload.
+ * v3 and v4 both use the same JSON format: `{ types, domain, primaryType, message }`.
+ * MetaMask sends them as `[from, jsonString]`.
+ */
+function parseTypedData(args: unknown[]): {
+  from: string;
+  domain: TypedDataDomain;
+  primaryType: string;
+  types: Record<string, { name: string; type: string }[]>;
+  message: Record<string, unknown>;
+} {
+  const [from, dataArg] = args as [string, string | Record<string, unknown>];
+  const data =
+    typeof dataArg === 'string'
+      ? (JSON.parse(dataArg) as Record<string, unknown>)
+      : dataArg;
+  return {
+    from: from ?? '',
+    domain: (data.domain ?? {}) as TypedDataDomain,
+    primaryType: (data.primaryType as string) ?? 'Unknown',
+    types: (data.types ?? {}) as Record<
+      string,
+      { name: string; type: string }[]
+    >,
+    message: (data.message ?? {}) as Record<string, unknown>,
+  };
 }
 
 /** Decode a request into something the clear-sign screen can render. */
@@ -59,6 +105,19 @@ export function previewRequest(request: KeyringRequest): RequestPreview {
       const [from, data] = args as [string, string];
       return { kind: 'message', method, from, text: data };
     }
+    case 'eth_signTypedData_v3':
+    case 'eth_signTypedData_v4': {
+      const parsed = parseTypedData(args);
+      return {
+        kind: 'typedData',
+        method,
+        from: parsed.from,
+        domain: parsed.domain,
+        primaryType: parsed.primaryType,
+        types: parsed.types,
+        message: parsed.message,
+      };
+    }
     default:
       return { kind: 'unknown', method };
   }
@@ -84,9 +143,13 @@ export async function signRequestWithCard(
       const [, data] = args as [string, string];
       return serializedSig(await card.signDigest(getBytes(data)));
     }
+    case 'eth_signTypedData_v3':
+    case 'eth_signTypedData_v4': {
+      return signTypedData(args, card);
+    }
     default:
       throw new Error(
-        `'${method}' is not supported yet by the card signer (transactions and message signing are).`,
+        `'${method}' is not supported yet by the card signer (transactions, messages, and typed data are).`,
       );
   }
 }
@@ -141,6 +204,45 @@ async function signTransaction(txIn: any, card: CardSigner): Promise<Json> {
   result.r = sig.r;
   result.s = sig.s;
   return result;
+}
+
+/**
+ * Sign EIP-712 typed data with the card.
+ *
+ * The digest is `keccak256("\x19\x01" || domainSeparator || structHash)`,
+ * computed by ethers' TypedDataEncoder. The result is a standard 65-byte
+ * signature string MetaMask expects for signTypedData.
+ */
+async function signTypedData(
+  args: unknown[],
+  card: CardSigner,
+): Promise<Json> {
+  const parsed = parseTypedData(args);
+
+  // ethers' TypedDataEncoder needs types WITHOUT the EIP712Domain entry
+  // (it computes the domain separator separately from the `domain` object).
+  const signingTypes = { ...parsed.types };
+  delete signingTypes.EIP712Domain;
+
+  const digest = TypedDataEncoder.hash(
+    parsed.domain as Record<string, unknown>,
+    signingTypes,
+    parsed.message,
+  );
+
+  const sig = await card.signDigest(digest);
+
+  // Safety: verify recovered address matches `from`.
+  if (parsed.from) {
+    const recovered = recoverAddress(digest, toEthersSig(sig));
+    if (recovered.toLowerCase() !== parsed.from.toLowerCase()) {
+      throw new Error(
+        `Card signature does not match account (expected ${parsed.from}, got ${recovered}).`,
+      );
+    }
+  }
+
+  return serializedSig(sig);
 }
 
 function serializedSig(sig: CardSignature): string {

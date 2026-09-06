@@ -1,13 +1,13 @@
 {
   "version": "2.1.0",
-  "description": "An example of a key management snap for a simple keyring.",
-  "proposedName": "MetaMask Simple Snap Keyring",
+  "description": "A card-backed MetaMask account whose signing key never touches the host. Clear-signs every request in plain English before approval.",
+  "proposedName": "NotWallet",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/MetaMask/snap-simple-keyring.git"
   },
   "source": {
-    "shasum": "sz/mseqQi1OTx/liEA8EiX3DuvOMDx3fL5psWI1G4ok=",
+    "shasum": "4WNh5rWlww4fsVKijZmwTUgGrrGtNWr+U2Eg9ScisL4=",
     "location": {
       "npm": {
         "filePath": "dist/bundle.js",
