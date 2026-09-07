@@ -38,7 +38,8 @@
         {
           "faceIDPermission": "NotWallet uses Face ID / fingerprint to confirm you before signing."
         }
-      ]
+      ],
+      "expo-secure-store"
     ]
   }
 }

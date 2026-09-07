@@ -1,7 +1,7 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { JsonRpcProvider, formatEther } from 'ethers';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -24,6 +24,7 @@ import { MfkdfSigner } from './src/mfkdf';
 import { isNfcSupported, readNfcCardId } from './src/nfc';
 import { decodeRequest, encodeAccount, encodeSignature } from './src/qr';
 import { previewRequest, signRequestWithCard } from './src/signing';
+import { clearAccount, loadAccount, saveAccount } from './src/storage';
 import type { KeyringRequest } from './src/types';
 
 const SEPOLIA_RPC = 'https://ethereum-sepolia-rpc.publicnode.com';
@@ -33,7 +34,7 @@ const RISK_COLOR: Record<RiskLevel, string> = {
   danger: '#ff5c5c',
 };
 
-type Screen = 'setup' | 'home' | 'scan' | 'review' | 'signed' | 'pair';
+type Screen = 'loading' | 'setup' | 'unlock' | 'home' | 'scan' | 'review' | 'signed' | 'pair';
 
 type Account = { address: string; publicKey: string };
 
@@ -62,7 +63,8 @@ function summarize(request: KeyringRequest): {
 const short = (a: string) => (a.length > 12 ? `${a.slice(0, 8)}…${a.slice(-6)}` : a);
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>('setup');
+  const [screen, setScreen] = useState<Screen>('loading');
+  const [locked, setLocked] = useState(false);
   const [password, setPassword] = useState('');
   const [cardId, setCardId] = useState('');
   const [account, setAccount] = useState<Account | null>(null);
@@ -75,6 +77,29 @@ export default function App() {
 
   const fail = (err: unknown) =>
     setError(err instanceof Error ? err.message : String(err));
+
+  // On launch, restore a saved wallet (public identity only) so it persists like
+  // a normal wallet. It comes up LOCKED — you unlock with password + card to sign.
+  useEffect(() => {
+    let alive = true;
+    loadAccount().then((saved) => {
+      if (!alive) {
+        return;
+      }
+      if (saved) {
+        setAccount({ address: saved.address, publicKey: saved.publicKey });
+        setLocked(true);
+        setScreen('home');
+        void fetchBalance(saved.address);
+      } else {
+        setScreen('setup');
+      }
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchBalance = useCallback(async (address: string) => {
     try {
@@ -97,6 +122,7 @@ export default function App() {
     }
   }, []);
 
+  // First-time setup: derive, persist the public identity, and unlock.
   const onUnlock = useCallback(async () => {
     setError('');
     setBusy(true);
@@ -104,14 +130,51 @@ export default function App() {
       const identity = await new MfkdfSigner(cardId, password).getIdentity();
       const acct = { address: identity.address, publicKey: identity.publicKey };
       setAccount(acct);
+      await saveAccount({
+        address: identity.address,
+        publicKey: identity.publicKey,
+        label: identity.label,
+      });
+      setLocked(false);
       setScreen('home');
-      fetchBalance(acct.address);
+      void fetchBalance(acct.address);
     } catch (err) {
       fail(err);
     } finally {
       setBusy(false);
     }
   }, [cardId, password, fetchBalance]);
+
+  // Unlock an already-saved wallet: re-derive and confirm it matches.
+  const onUnlockExisting = useCallback(async () => {
+    setError('');
+    setBusy(true);
+    try {
+      const identity = await new MfkdfSigner(cardId, password).getIdentity();
+      if (
+        !account ||
+        identity.address.toLowerCase() !== account.address.toLowerCase()
+      ) {
+        throw new Error('Wrong password or card for this wallet.');
+      }
+      setLocked(false);
+      setScreen('scan');
+    } catch (err) {
+      fail(err);
+    } finally {
+      setBusy(false);
+    }
+  }, [cardId, password, account]);
+
+  const onForget = useCallback(async () => {
+    await clearAccount();
+    setAccount(null);
+    setPassword('');
+    setCardId('');
+    setLocked(false);
+    setBalance('—');
+    setScreen('setup');
+  }, []);
 
   const onScanned = useCallback(
     (data: string) => {
@@ -170,6 +233,12 @@ export default function App() {
         <Text style={styles.sub}>Offline signer — your key never leaves this phone.</Text>
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
+        {screen === 'loading' && (
+          <View style={{ marginTop: 40 }}>
+            <ActivityIndicator color="#4f46e5" size="large" />
+          </View>
+        )}
+
         {screen === 'setup' && (
           <>
             <Text style={styles.label}>Unlock your wallet</Text>
@@ -206,19 +275,59 @@ export default function App() {
         {screen === 'home' && account && (
           <>
             <View style={styles.card}>
-              <Text style={styles.cardLabel}>Account</Text>
+              <Text style={styles.cardLabel}>Account {locked ? '🔒' : '🔓'}</Text>
               <Text style={styles.address}>{short(account.address)}</Text>
               <Text style={styles.balance}>{balance}</Text>
               <Text style={styles.network}>Sepolia</Text>
             </View>
-            <TouchableOpacity style={styles.primary} onPress={() => setScreen('scan')}>
-              <Text style={styles.primaryText}>📷 Scan request to sign</Text>
+            <TouchableOpacity
+              style={styles.primary}
+              onPress={() => setScreen(locked ? 'unlock' : 'scan')}
+            >
+              <Text style={styles.primaryText}>
+                {locked ? '🔒 Unlock to sign' : '📷 Scan request to sign'}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.secondary} onPress={() => setScreen('pair')}>
               <Text style={styles.secondaryText}>🔗 Pair with MetaMask</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => fetchBalance(account.address)}>
               <Text style={styles.link}>Refresh balance</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onForget}>
+              <Text style={styles.link}>Forget this wallet</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {screen === 'unlock' && (
+          <>
+            <Text style={styles.label}>Unlock to sign</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Password"
+              placeholderTextColor="#66708a"
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
+            />
+            <View style={styles.row}>
+              <TextInput
+                style={[styles.input, { flex: 1 }]}
+                placeholder="Card id (tap to fill)"
+                placeholderTextColor="#66708a"
+                value={cardId}
+                onChangeText={setCardId}
+              />
+              <TouchableOpacity style={styles.ghost} onPress={onTapCard}>
+                <Text style={styles.ghostText}>📇 Tap</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity style={styles.primary} onPress={onUnlockExisting} disabled={busy}>
+              {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Unlock</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setScreen('home')}>
+              <Text style={styles.link}>Back</Text>
             </TouchableOpacity>
           </>
         )}
