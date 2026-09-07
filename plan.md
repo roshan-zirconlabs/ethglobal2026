@@ -2,8 +2,8 @@
 
 > **What this is:** the working status + roadmap for NotWallet, a MetaMask
 > Account Management Snap that gives MetaMask an account whose signing key lives
-> on an **offline card / device — never on the host**, and shows an **AI
-> clear-signing screen** ("what am I signing?") before every approval.
+> on an **offline card / device — never on the host**, and shows a
+> **clear-signing screen** ("what am I signing?") before every approval.
 >
 > **This doc is written so another AI tool (or a fresh chat) can continue the
 > work.** Read §1–§3 for the mental model, §4 for what's done, §5 for what's

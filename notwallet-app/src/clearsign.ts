@@ -5,10 +5,10 @@
  * risk flags, shown to the user BEFORE the biometric approval. This is the thing
  * AirGap/Keystone don't do — they sign blind.
  *
- * v0 here is a deterministic rules pass (no network, fully offline, auditable).
- * An optional LLM pass (src/ai.ts, TODO) can enrich the summary; the rules pass
- * must always run and must be able to VETO on its own, so a compromised/misleading
- * LLM can never talk the user into approving. Rules > model for a security screen.
+ * A deterministic rules pass — no network, fully offline, auditable. Deliberately
+ * NOT an LLM: a security approval screen must be deterministic and un-manipulable.
+ * An LLM in the approval path is non-deterministic, needs the network (breaking the
+ * air-gap), and is prompt-injectable — strictly worse for this job.
  */
 import { Interface, formatEther, getAddress, MaxUint256 } from "ethers";
 

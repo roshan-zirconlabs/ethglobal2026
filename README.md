@@ -3,7 +3,7 @@
 A **MetaMask Account Management Snap** that adds a new account type backed by an
 **offline NFC card**. The signing key is generated on the card and **never
 touches the PC** — so malware on the host has nothing to steal, and nothing can
-be signed without a physical tap. A **companion dapp** shows an **AI plain-English
+be signed without a physical tap. A **companion dapp** shows a **plain-English
 "what am I signing" screen** before you tap — closing the blind-signing gap that
 even Keycard/Tangem leave open. Full rationale, prior-art map, and plan: **[idea.md](idea.md)**.
 
@@ -15,7 +15,7 @@ disk). This keeps the key on a card's secure element, and de-blinds the approval
 ```
 MetaMask (extension)  ──▶  NotWallet Snap  ──parks request, redirects──▶  Companion dapp (phone)
    (unmodified)             (no private key,                                 - decode tx
-                             relays signatures)                              - AI clear-signing
+                             relays signatures)                              - clear-signing
                                    ▲                                         - tap card (WebNFC)
                                    └────────── approveRequest(signature) ────┘
 ```

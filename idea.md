@@ -1,4 +1,4 @@
-# NotWallet — Phone-as-Hardware-Wallet for MetaMask + AI Clear-Signing
+# NotWallet — Phone-as-Hardware-Wallet for MetaMask + Clear-Signing
 
 > **Purpose of this doc:** The working spec for what we're building at **ETHOnline 2026**. It supersedes the earlier ideation notes. It captures the origin problem, the decision trail (what we rejected and *why*), the prior-art map, the technical architecture, the sponsor fit, and the concrete 9-day build + demo plan. A fresh chat should be able to continue from here cold.
 
@@ -6,11 +6,11 @@
 
 ## 0. TL;DR — what we're building
 
-**A MetaMask Account Management Snap that adds a new account type backed by an offline NFC card — the signing key lives on the card, never on the PC — plus a companion dapp that shows an AI plain-English "what am I signing" screen on the phone before you tap. It ends *blind signing*, the gap even today's hardware wallets have.**
+**A MetaMask Account Management Snap that adds a new account type backed by an offline NFC card — the signing key lives on the card, never on the PC — plus a companion dapp that shows a plain-English "what am I signing" screen on the phone before you tap. It ends *blind signing*, the gap even today's hardware wallets have.**
 
 - **Inside MetaMask, no separate wallet app.** The user installs the Snap and just adds a "Card Account." They keep using MetaMask exactly as before.
 - The private key is generated on and **never leaves the card's secure element** — it's never in the Snap, the extension, or on the host. Malware on the PC has nothing to steal, and **no card tap = no signature = no transaction.** Defeats the PC-malware attack that drained me.
-- The companion dapp (on the phone) shows an **AI clear-signing screen** — plain English + risk flags — computed from the exact bytes the card will sign, so what you see is what you sign. **This is the novel part** vs. Keycard/Tangem, which sign blind.
+- The companion dapp (on the phone) shows a **clear-signing screen** — plain English + risk flags — computed from the exact bytes the card will sign, so what you see is what you sign. **This is the novel part** vs. Keycard/Tangem, which sign blind.
 - **The one-line pitch:** *"A hardware wallet that lives in a tap-card and inside the MetaMask you already use — and shows you what you're actually signing."*
 
 **Architecture decision log (we evaluated three, this is why Snap won):**
@@ -65,7 +65,7 @@ The building blocks all exist separately. Our gap is a specific *combination*, a
 | **Phone enclave as a signer *inside MetaMask*, no purchase, self-custody** | ❌ **Not found** | — | **This is our gap** |
 | Vendor tap-to-pay card | ✅ **Ethercard** (ETHGlobal): receiver requests payment, sender taps card on receiver's phone; ZK "proof of key ownership" + account abstraction/paymaster | Already demoed 3 yrs ago | Why we dropped that framing |
 | MFKDF (card+enclave+password) unlock | ⚠️ Academic only (MFKDF2) | No shipped product | Roadmap, not v1 |
-| AI clear-signing / risk brain at the approval step | ⚠️ Partial (Blockaid, Wallet Guard scan txns) | Nobody fuses it *into a hardware-approval step* | Our unfair advantage |
+| clear-signing / risk brain at the approval step | ⚠️ Partial (Blockaid, Wallet Guard scan txns) | Nobody fuses it *into a hardware-approval step* | Our unfair advantage |
 
 **Verdict:** "another hardware signer for MetaMask" would look derivative. **"The free, no-purchase hardware wallet that lives in your phone, plugs into MetaMask, and explains what you're signing"** is the open, defensible angle.
 
@@ -76,7 +76,7 @@ The building blocks all exist separately. Our gap is a specific *combination*, a
 ### 5.1 How it plugs into MetaMask (DECIDED: QR external signer)
 - **MetaMask is source-available (proprietary license since 2020) — we do NOT fork it.** We connect as an **external QR signer**, which MetaMask supports natively on **mobile and desktop** (the same path as Keystone, AirGap Vault, NGRAVE — no Snap, no dev build, no allowlist).
 - Our phone app speaks MetaMask's **animated-QR protocol** via the **Keystone SDK** (`@keystonehq/keystone-sdk` + `@keystonehq/bc-ur-registry-eth`, BC-UR encoding). Pairing = MetaMask reads the account QR once; thereafter MetaMask shows an unsigned-tx QR, the phone scans it, and returns a signature QR.
-- **Signing flow:** MetaMask builds the unsigned tx → shows QR → **phone scans → AI clear-signing screen → FaceID → sign in the enclave → phone shows signature QR → MetaMask scans → broadcasts.** The phone is air-gapped end-to-end.
+- **Signing flow:** MetaMask builds the unsigned tx → shows QR → **phone scans → clear-signing screen → FaceID → sign in the enclave → phone shows signature QR → MetaMask scans → broadcasts.** The phone is air-gapped end-to-end.
 - **Demo topology:** desktop MetaMask (normal, unmodified) ↔ our phone signer app, connected only by on-screen QR + phone camera. Two devices = the real security story (browse on PC, sign on phone). Same-device (MetaMask mobile + our app, via deeplink) is possible but weaker — mention, don't lead with it.
 - **Prior art we reuse vs. beat:** we reuse the QR transport (AirGap/Keystone already do it). We **beat** them on the thing they lack — clear signing (§5.3). The community even built a standalone tool just to de-blind AirGap+MetaMask QR signing, proving the demand.
 - **Snap path (set aside):** an Account Management Snap (Keyring API async flow) is the alternative, but it's extension-only, allowlist-gated (demo needs MetaMask Flask), and needs a phone↔PC relay we'd build ourselves. Kept as fallback only.
@@ -88,7 +88,7 @@ On a phone, the enclave **cannot natively sign secp256k1** (it does P-256 only).
 
 **v1 decision:** start with **(A)** for demo speed; be explicit in the video about which one shipped. Note (B) as the stronger production path. (This is the "plain EOA vs never-in-RAM" tension — for the real threat model, never-in-RAM wins long-term.)
 
-### 5.3 The AI clear-signing brain
+### 5.3 The clear-signing brain
 - At approval time, translate raw calldata/tx into plain English and flag risk: new/never-paid address, infinite approvals, unverified contracts, over-limit, lookalike addresses.
 - This is the anti-phishing / anti-blind-signing half of the original attack, and it's the differentiator judges will remember.
 
@@ -116,7 +116,7 @@ Full pool for reference: The Graph $15k · Hedera $15k · Arc $10k · World $7k 
 ### Local build loop
 1. **Our phone signer app** = a small web app / PWA (works over the phone browser; Android Chrome also gives us WebNFC later for the card). Key generated + sealed in the secure element; biometric (WebAuthn/FaceID) to unlock.
 2. **QR transport via the Keystone SDK** (`@keystonehq/keystone-sdk`, `@keystonehq/bc-ur-registry-eth`) — encode the account/signature URs, decode MetaMask's unsigned-tx URs. Test against a normal MetaMask ("Connect hardware wallet → QR-based").
-3. **AI clear-signing** = decode the tx, call an LLM (or a rules+LLM hybrid) to produce the plain-English summary + risk flags, shown before the FaceID prompt.
+3. **clear-signing** = decode the tx, run a deterministic rules engine to produce the plain-English summary + risk flags, shown before the FaceID prompt.
 4. **Reference, don't fork:** read Keystone's dev hub + `ur-registry` and AirGap Vault for how they seal keys / build the QR frames; build our own lean app so we own the UX (AirGap's UX is the thing we're improving).
 5. No physical card needed for v1; the enclave is the single signer.
 
@@ -127,11 +127,11 @@ Full pool for reference: The Graph $15k · Hedera $15k · Arc $10k · World $7k 
 **Must-have (proves the thesis):**
 - Phone signer app: enclave-protected key (option A), biometric unlock, QR pairing with unmodified MetaMask via the Keystone SDK.
 - Round-trip signing: MetaMask tx-QR → phone scans → signs → signature-QR → MetaMask broadcasts.
-- **AI clear-signing screen** before approval (this is the differentiator — do NOT cut it).
+- **clear-signing screen** before approval (this is the differentiator — do NOT cut it).
 - Screen-recordable **before→after** (see §9).
 
 **Add if time:**
-- The **AI clear-signing** screen (highest impact after the core).
+- The **clear-signing** screen (highest impact after the core).
 - Spending limits (pulls in Privy framing).
 - World ID / ENS name on the account.
 
@@ -144,7 +144,7 @@ Full pool for reference: The Graph $15k · Hedera $15k · Arc $10k · World $7k 
 
 1. **Before:** normal MetaMask hot wallet. Show the key/keystore sitting on disk — the exact thing malware drained on my PC (optionally show a script reading the keystore).
 2. **After:** pair our phone signer with MetaMask by scanning one QR ("Connect hardware wallet → QR"). **The key is not on the PC — it's sealed in the phone's secure element, and the phone never touches the PC.**
-3. **Sign flow:** initiate a send in desktop MetaMask → it shows a QR → phone scans it → **AI plain-English clear-signing screen** ("Send 0.5 ETH to 0x… — a new address you've never paid; looks safe") → FaceID → phone shows the signature QR → MetaMask scans it → broadcasts. Contrast with AirGap/Keystone, which would sign this blind.
+3. **Sign flow:** initiate a send in desktop MetaMask → it shows a QR → phone scans it → **plain-English clear-signing screen** ("Send 0.5 ETH to 0x… — a new address you've never paid; looks safe") → FaceID → phone shows the signature QR → MetaMask scans it → broadcasts. Contrast with AirGap/Keystone, which would sign this blind.
 4. **Kill shot:** simulate the malware — "attacker on this PC tries to drain the wallet" → the tx **can't be signed**: the key isn't here and the phone never approved. Thesis proven in ~20 seconds.
 
 ---
