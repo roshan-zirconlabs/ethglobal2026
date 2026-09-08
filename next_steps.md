@@ -39,10 +39,10 @@ Legend: 👤 = a human must do it (accounts/keys/device). 🤖 = code, any AI ca
 - **Accept:** connect to a real dapp (e.g. Reown's sample or a testnet Uniswap), do
   `personal_sign` and a Sepolia `eth_sendTransaction` end-to-end, see it on the explorer.
 
-## 2. Clear-signing + ENS identity (the differentiator, Tier-1)
+## 2. Clear-signing + ENS resolution (the differentiator, Tier-1)
 
-- [ ] 🤖 `ens.ts`: ENSv2 Universal Resolver on Sepolia — `resolveName`, `lookupAddress`,
-  `forwardMatches`. Fail-open (no ENS ⇒ still render hex + rules).
+- [ ] 🤖 `ens.ts` (resolution half): ENSv2 Universal Resolver on Sepolia —
+  `resolveName`, `lookupAddress`, `forwardMatches`. Fail-open (no ENS ⇒ still render hex + rules).
 - [ ] 🤖 `clearsign.ts`: enrich summaries with ENS (`to vitalik.eth ✅`) and add the
   impersonation flag when forward-resolution mismatches.
 - [ ] 🤖 Build the **Review & Sign (HERO)** screen per new_plan §8.3(4): RiskBadge,
@@ -68,7 +68,25 @@ Legend: 👤 = a human must do it (accounts/keys/device). 🤖 = code, any AI ca
 - [ ] ✍️ Write the required **World feedback doc**.
 - **Accept:** an override triggers Selfie Check in the sandbox and proceeds only on success.
 
-## 5. The Graph — Approvals + alerts (sponsor, Tier-2)
+## 5. ENSv2 account model — the ENS prize centerpiece (sponsor, Tier-2)
+
+> Central, in-scope, no AI agents. Uses hierarchical registry + EAC + Permissioned
+> Resolver. See new_plan §6.1. Honest boundary: ENS names/delegates/revokes; it does
+> NOT move funds.
+
+- [ ] 👤 Register the parent `notwallet.eth` on **Sepolia ENSv2**.
+- [ ] 🤖 `contracts/NotWalletRegistrar.sol` (Foundry) — subname registrar under the
+  parent with **Enhanced Access Control** roles (owner vs registrar/guardian). *Lighter
+  fallback: use the ENSv2 registry/resolver contracts directly, no custom registrar.*
+- [ ] 🤖 `ens.ts` (write half) + `subaccounts.ts`: `registerSubname`, `createSubAccount`
+  (child subname → new MFKDF-labelled address), `setTextRecord`, `grantGuardianRole`/`revokeRole`, `setRecoveryRecord`.
+- [ ] 🤖 UI: **sub-account switcher** on Home; **Recovery & Guardians** screen (add/revoke
+  a scoped guardian; recovery pointer as a text record).
+- **Accept (all live on Sepolia, no hard-coded values):** issue `you.notwallet.eth`;
+  create a `daily.you…` sub-account and switch to it; set the recovery text record;
+  grant an EAC guardian role and revoke it; resolve everything back.
+
+## 6. The Graph — Approvals + alerts (sponsor, Tier-2)
 
 - [ ] 👤 Create a **Subgraph Studio** subgraph; deploy a subgraph indexing ERC-20/721
   `Approval`/`ApprovalForAll`/`Transfer` on Sepolia; get the query URL + API key.
@@ -78,18 +96,17 @@ Legend: 👤 = a human must do it (accounts/keys/device). 🤖 = code, any AI ca
 - **Accept:** dashboard shows live approvals from The Graph (not mocked); revoke works;
   a new unknown approval is highlighted. Do *meaningful* reasoning, not just printing.
 
-## 6. Recovery vault (Tier-2)
+## 7. Recovery (Tier-2)
 
-- [ ] 🤖 `recovery.ts`: set immutable recovery address (store + optional ENS text record);
-  **sweep** = batch send balances + `approve(spender,0)` for known approvals.
-- [ ] 🤖 Recovery screen: set/confirm + guarded **Emergency sweep** (double-confirm + Selfie Check).
+- [ ] 🤖 `recovery.ts`: **sweep** = batch send balances + `approve(spender,0)` for known
+  approvals to the recovery address (which is set as the ENSv2 text record in §5).
+- [ ] 🤖 Recovery screen: guarded **Emergency sweep** (double-confirm + Selfie Check).
 - **Accept:** sweep moves funds to the recovery address on Sepolia. Document the race caveat.
 
-## 7. Ship & submit
+## 8. Ship & submit
 
-- [ ] 🤖 ENS L3 (recovery as text record); ENS L1 registrar only if time.
-- [ ] ✍️ Per-sponsor writeups: ENS (central usage), World (feedback doc), Graph (subgraph + reasoning);
-  Uniswap-style FEEDBACK.md not needed (Uniswap dropped).
+- [ ] ✍️ Per-sponsor writeups: ENS (central ENSv2 account model — §5), World (feedback doc),
+  Graph (subgraph + reasoning). (Uniswap/Privy/Ledger dropped — no FEEDBACK.md needed.)
 - [ ] 👤 **Demo video (2–4 min)** — the before→after; connect → clear-sign catches a drainer → sign.
 - [ ] 👤 Submit on ETHGlobal with public repo + video + live/APK.
 

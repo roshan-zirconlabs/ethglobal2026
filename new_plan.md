@@ -116,7 +116,9 @@ outputs / acceptance**. Keep pure logic framework-agnostic and unit-testable.
 | `clearsign.ts` | MODIFY | Add ENS-aware summaries + impersonation flag (see `ens.ts`). Keep rules (infinite approval, setApprovalForAll, Permit/Permit2, new-counterparty). Deterministic, offline for the rules; ENS is an async enrichment layer that must fail-open (no ENS ⇒ still show hex + rules). |
 | `nfc.ts` | MODIFY | Native NFC via `react-native-nfc-manager` (`IsoDep`, `NfcA`), 15s timeout, always `cancelTechnologyRequest` in finally. Return UID string. Typed fallback in UI. |
 | `walletconnect.ts` | NEW | Init Reown WalletKit (`@reown/walletkit` + `@walletconnect/core` + `@walletconnect/react-native-compat`). Handle `pair(uri)`, `session_proposal` (approve with our account + chains), `session_request` (route to the signer via a callback the UI supplies), `respondSessionRequest`. **Accept:** connect to https://react-app.walletconnect.com or a real dapp; sign a message end-to-end. |
-| `ens.ts` | NEW | ENSv2 on Sepolia: `resolveName(name)`, `lookupAddress(addr)` (reverse), `forwardMatches(name, addr)` (anti-impersonation), `registerSubname(label, addr, records)`, `setTextRecord`. Use the ENSv2 Universal Resolver contract directly (ethers may not resolve ENSv2 out of the box). **Accept:** a known Sepolia name resolves; a registered subname resolves back. |
+| `ens.ts` | NEW | ENSv2 (Sepolia). **Resolution:** `resolveName`, `lookupAddress` (reverse), `forwardMatches` (anti-impersonation). **Write/manage:** `registerSubname(label, addr, records)`, `createSubAccount(label)` (child subname → new derived address), `setTextRecord`, `grantGuardianRole(addr)` / `revokeRole` (Enhanced Access Control), `setRecoveryRecord(addr)`. Use the ENSv2 registry/resolver + Universal Resolver contracts directly (ethers may not resolve ENSv2 OOTB). **Accept:** issue a real subname; set a text record; grant + revoke an EAC role; resolve it back — all live on Sepolia. |
+| `contracts/NotWalletRegistrar.sol` | NEW (optional) | ENSv2 subname registrar under a parent we own, with EAC roles (owner vs registrar/guardian). Solidity + Foundry. Skip if using ENSv2 contracts directly is enough. |
+| `subaccounts.ts` | NEW | Derive/label sub-account addresses (MFKDF with a per-account label) and bind each to its ENSv2 child subname. |
 | `storage.ts` | KEEP/MODIFY | `expo-secure-store` for the **public** account identity + settings (recovery address, policies, ENS name). Never store password/key. Add multi-account/multi-card later. |
 | `policies.ts` | NEW (2nd tier) | Pure functions: given a decoded tx + settings, return `{ action: 'allow'|'warn'|'block', reason }`. Infinite-approval → offer capped amount; per-tx cap → warn; `setApprovalForAll` → warn. **Advisory only** — enforced in-app, documented as such. |
 | `approvals.ts` | NEW (2nd tier) | Query the **NotWallet subgraph** (The Graph) for the address's live ERC-20/721 allowances; `revoke(spender, token)` = `approve(spender, 0)` signed via the signer. |
@@ -134,19 +136,41 @@ Delete/retire in `notwallet/packages/site`: the companion dapp's phone-bridge/pa
 
 ## 6. Sponsor integrations (exact requirements → what we build)
 
-### 6.1 ENS — "Best Use of ENSv2" ($4,500). CENTRAL. Build order L2 → L3 → L1.
-- **L2 (do first, highest value/lowest risk): identity-aware clear-signing.** In the
-  Review screen, resolve the counterparty via the **ENSv2 Universal Resolver on
-  Sepolia**; verify forward resolution matches (anti-impersonation); show
-  `Send 0.5 ETH to vitalik.eth ✅ (0xd8dA…6045)`, and flag
-  `🚨 "uniswap.eth" does NOT resolve to this address`. *Central: it improves the core product.*
-- **L3: recovery address as an ENSv2 text record** on the wallet's subname (public,
-  auditable).
-- **L1 (if time): a NotWallet subname registrar** — issue `you.notwallet.eth` at
-  setup, one-per-address, with **Enhanced Access Control** roles (owner vs registrar).
-  ENSv2 write support is preview — hardest piece; a simpler subname issuance may suffice.
-- **Qualify:** ENSv2 on Sepolia, central (not cosmetic), functional (no hard-coded
-  values), open source + demo video.
+### 6.1 ENS — "Best Use of ENSv2" ($4,500). CENTRAL — it's the *structure* of the wallet.
+
+Pure name resolution scores as **cosmetic** and won't win. We build the wallet's
+**account model ON ENSv2's new features** — four of them, used centrally, all
+in-scope (no AI agents, no scope creep):
+
+1. **Wallet identity = an ENSv2 subname** (`you.notwallet.eth`), issued from a
+   NotWallet **subname registry** on Sepolia. → hierarchical registry.
+2. **Named sub-accounts** as child subnames (`daily.you…`, `savings.you…`) — each a
+   distinct MFKDF-derived address (different derivation label). Human-readable money
+   "envelopes." → hierarchical registry.
+3. **Guardian / social recovery via Enhanced Access Control:** grant a trusted
+   address a **scoped role** that can update ONLY the recovery-target record —
+   nothing else (can't touch funds or ownership). → EAC.
+4. **Config as records on a Permissioned Resolver:** recovery address, account
+   labels, and policy notes as auditable text records the subname owns; delegated/
+   shared sub-accounts are **revocable/expiring**. → Permissioned Resolver.
+
+**Supporting (Tier-1, keep):** identity-aware clear-signing in the Review screen —
+resolve the counterparty, forward-check for **anti-impersonation**, show
+`to vitalik.eth ✅` or flag `🚨 "uniswap.eth" does NOT resolve to this address`.
+
+**HONEST BOUNDARY (say it in the demo):** ENS names / organizes / delegates /
+revokes — it does **not** move funds or enforce a spend cap. The guardian recovers
+*identity + the recovery pointer*; sweeping funds is the wallet/recovery layer.
+ENSv2 = identity + permissions; the wallet enforces the money.
+
+- **Qualify:** on Sepolia; **central** (accounts + delegation + recovery built ON
+  ENSv2, not just displaying a name); functional (real subname issuance, real EAC
+  grant + revocation — no hard-coded values); uses the specific new primitives
+  (registry hierarchy, EAC, Permissioned Resolver); open source + demo/video.
+- **Effort:** the subname registry + EAC contracts are the meat (your Solidity
+  wheelhouse), but ENSv2 write support is **preview** — the riskiest, and *why* it
+  scores. Lighter fallback: issue subnames under a parent we own and set EAC roles
+  via the ENSv2 contracts directly (no custom registrar).
 
 ### 6.2 World — "Selfie Check" ($3,500). Gate high-risk ops.
 - Trigger Selfie Check ONLY on: recovery activation, policy override, first-time
@@ -174,18 +198,20 @@ Delete/retire in `notwallet/packages/site`: the companion dapp's phone-bridge/pa
 
 **Tier 1 — MUST (proves the thesis, sharp core):**
 1. Standalone **WalletConnect** connect + sign.
-2. **Clear-signing + ENS identity** (the differentiator).
-3. **MFKDF signer** (2-factor).
+2. **Clear-signing + ENS resolution/anti-impersonation** in Review (the differentiator).
+3. **MFKDF signer** (2-factor: password + 1 card).
 4. **App-layer policies** as warnings/choices (infinite-approval block, per-tx cap) — honestly advisory.
 5. **World Selfie Check** on override.
 6. **Excellent UI** (§8) — this is a wallet; trust is visual.
 
 **Tier 2 — SHOULD (add once Tier 1 is solid):**
-7. **The Graph** subgraph → **Approvals dashboard** + one-tap revoke.
-8. **Recovery vault** (pre-set address + sweep; document the race).
-9. **Unauthorized-activity alert** (poll on app-open + optional small push backend — NOT unreliable 30s background polling).
+7. **ENSv2 account model** — wallet subname + named sub-accounts + EAC guardian
+   recovery + resolver records (the **ENS prize centerpiece**; contract-heavy, §6.1).
+8. **The Graph** subgraph → **Approvals dashboard** + one-tap revoke.
+9. **Recovery** (pre-set address + sweep; document the race).
+10. **Unauthorized-activity alert** (poll on app-open + optional small push backend — NOT unreliable 30s background polling).
 
-**Tier 3 — NICE:** multi-card, decoded tx history, ENS L1 registrar, device-binding-with-backup (3rd factor).
+**Tier 3 — NICE:** decoded tx history, device-binding-with-backup (opt-in 3rd factor).
 
 *Anti-scope: we win on a sharp, trustworthy, seedless wallet that de-blinds signing — not on 14 half-features. Cut before diluting.*
 
@@ -223,9 +249,10 @@ Elevation: soft shadows on cards/sheets; never harsh.
 1. **Onboarding / Unlock** — brand mark; "Your key, your phone, no seed phrase."
    Password + card row; primary "Unlock". Strength meter on the password. First-run
    adds a recovery-address step and (optional) ENS subname claim.
-2. **Home / Portfolio** — top: account pill (ENS name + 🔒/🔓, network). Big balance.
-   Below: token list (icon, name, amount, fiat). Primary actions: **Connect a dapp**,
-   **Approvals**, **Recovery**. Empty state guides funding on Sepolia.
+2. **Home / Portfolio** — top: account pill (**ENS subname** + 🔒/🔓, network) that
+   opens a **sub-account switcher** (`daily.you…`, `savings.you…` — named ENSv2
+   subnames). Big balance. Token list (icon, name, amount, fiat). Primary actions:
+   **Connect a dapp**, **Approvals**, **Recovery**. Empty state guides funding on Sepolia.
 3. **Connect** — full-screen camera to scan the WalletConnect QR; on pair, a sheet
    shows the dapp (name, **verified domain**, requested chains/permissions) → Approve/Reject.
 4. **Review & Sign (HERO)** — the peak. Top: RiskBadge + the dapp identity. Center:
@@ -240,8 +267,11 @@ Elevation: soft shadows on cards/sheets; never harsh.
 6. **Approvals dashboard** — list of live allowances (token → spender AddressChip,
    amount, ⚠️ if unlimited/unknown), one-tap **Revoke**. Pull-to-refresh; "new unknown
    approval" highlighted.
-7. **Recovery** — set/confirm the immutable recovery address (with ENS resolve);
-   a prominent, guarded **"Emergency sweep"** (double-confirm + Selfie Check).
+7. **Recovery & Guardians** — set/confirm the immutable recovery address (stored as
+   an **ENSv2 text record**); **add a guardian** (grant a scoped **EAC** role on your
+   name — can update only the recovery pointer) and **revoke** it; a prominent,
+   guarded **"Emergency sweep"** (double-confirm + Selfie Check). Copy states the
+   boundary: *guardians recover identity + recovery pointer; the wallet moves funds.*
 8. **Settings** — policies (limits, toggles), network, card management, "Forget wallet",
    and the honest security explainer.
 
@@ -259,12 +289,15 @@ Elevation: soft shadows on cards/sheets; never harsh.
 2. `theme.ts` + component kit + Home/Unlock shell (persistence already done).
 3. **WalletConnect** connect + `personal_sign` end-to-end (the backbone).
 4. `eth_sendTransaction` sign-and-broadcast; typed-data.
-5. **ENS L2** identity in the Review screen (the differentiator).
+5. **ENS resolution + anti-impersonation** in the Review screen (the differentiator).
 6. **Policies** (advisory) in Review.
 7. **World Selfie Check** on override (adds a native module → one more build).
-8. **The Graph** subgraph + Approvals dashboard.
-9. Recovery vault + alerts.
-10. Demo video + submission (ENS + World + Graph writeups, FEEDBACK docs).
+8. **ENSv2 account model** — parent name, subname registry/issuance, named
+   sub-accounts, EAC guardian recovery, resolver records (the ENS prize centerpiece;
+   Solidity + ethers writes).
+9. **The Graph** subgraph + Approvals dashboard.
+10. Recovery + alerts.
+11. Demo video + submission (ENS + World + Graph writeups, World FEEDBACK doc).
 
 ---
 
@@ -274,11 +307,18 @@ Elevation: soft shadows on cards/sheets; never harsh.
 - **WalletConnect:** Reown project id from cloud.reown.com; namespaces `eip155:11155111` (+ mainnet for reads).
 - **Signed-tx result:** for `eth_sendTransaction` return the broadcast tx hash; for
   signatures return the 65-byte hex (personal/eth_sign) or the typed-data signature.
-- **ENS:** ENSv2 Universal Resolver (Sepolia) address — fill in from ENS docs; resolver
-  interface for text records.
+- **ENS:** ENSv2 on **Sepolia**. Parent name we own = `notwallet.eth` (register on
+  Sepolia). Fill in the ENSv2 **Universal Resolver**, **registry**, and
+  **Permissioned Resolver** addresses from ENS docs. Sub-account label → child
+  subname; recovery pointer + labels + policy = text records; guardian = an **EAC**
+  role scoped to the recovery record only.
 
 ## 11. Open decisions — RESOLVED
-- MFKDF = **2-factor** (recoverable). Device-binding only with encrypted backup, later.
+- MFKDF = **2-factor, exactly 1 card** + password (recoverable anywhere). No
+  multi-card. Device-binding only with an *encrypted* backup, later (opt-in).
+- **ENS = the wallet's account model on ENSv2** (subname identity + named
+  sub-accounts + EAC guardian recovery + Permissioned-Resolver records), with
+  identity clear-signing as a supporting feature. NOT shallow resolution. No AI agents.
 - Sponsors = **ENS + World + The Graph.** Drop Privy, Ledger.
 - Transport = **WalletConnect** (standalone). Snap kept only as an optional bonus.
 - Monitoring = **on-open + optional small push backend**, NOT unreliable 30s background polling.
