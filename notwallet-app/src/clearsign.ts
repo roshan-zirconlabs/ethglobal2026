@@ -11,6 +11,7 @@
  * air-gap), and is prompt-injectable — strictly worse for this job.
  */
 import { Interface, formatEther, getAddress, MaxUint256 } from "ethers";
+import type { ResolvedIdentity } from "./ens";
 
 export interface DecodedTx {
   to: string | null;
@@ -39,8 +40,21 @@ const erc20 = new Interface([
   "function setApprovalForAll(address operator, bool approved)",
 ]);
 
+/**
+ * Resolved ENS names for addresses in the transaction.
+ * Map key is lowercase address, value is ResolvedIdentity.
+ */
+export type ResolvedNames = Map<string, ResolvedIdentity>;
+
+/** Display an address with its ENS name if available. */
+function displayAddr(addr: string, resolvedNames?: ResolvedNames): string {
+  if (!resolvedNames) return short(addr);
+  const resolved = resolvedNames.get(addr.toLowerCase());
+  return resolved ? resolved.display : short(addr);
+}
+
 /** Addresses the user has paid before — supplied by the caller (persisted locally). */
-export function clearSign(tx: DecodedTx, knownAddresses: Set<string>): ClearSignResult {
+export function clearSign(tx: DecodedTx, knownAddresses: Set<string>, resolvedNames?: ResolvedNames): ClearSignResult {
   const flags: RiskFlag[] = [];
   let summary = "Unrecognized transaction — review carefully on a block explorer.";
 
@@ -49,37 +63,47 @@ export function clearSign(tx: DecodedTx, knownAddresses: Set<string>): ClearSign
   if (to === null) {
     flags.push({ level: "warn", message: "This deploys a contract (no recipient)." });
   } else if (isEmptyData(tx.data)) {
-    summary = `Send ${formatEther(tx.valueWei)} ETH to ${short(to)}.`;
+    summary = `Send ${formatEther(tx.valueWei)} ETH to ${displayAddr(to, resolvedNames)}.`;
   } else {
     const parsed = tryParse(tx.data);
     if (parsed?.name === "approve") {
       const [spender, amount] = parsed.args as unknown as [string, bigint];
       const infinite = amount >= MaxUint256 / 2n;
       summary = infinite
-        ? `Give ${short(spender)} UNLIMITED permission to spend your ${short(to)} tokens.`
-        : `Allow ${short(spender)} to spend up to ${amount} of your ${short(to)} tokens.`;
+        ? `Give ${displayAddr(spender, resolvedNames)} UNLIMITED permission to spend your ${displayAddr(to, resolvedNames)} tokens.`
+        : `Allow ${displayAddr(spender, resolvedNames)} to spend up to ${amount} of your ${displayAddr(to, resolvedNames)} tokens.`;
       if (infinite)
         flags.push({ level: "danger", message: "Infinite token approval — a common drainer pattern." });
     } else if (parsed?.name === "setApprovalForAll") {
       const [op, approved] = parsed.args as unknown as [string, boolean];
       summary = approved
-        ? `Give ${short(op)} control of ALL your NFTs in this collection.`
-        : `Revoke ${short(op)}'s access to your NFTs.`;
+        ? `Give ${displayAddr(op, resolvedNames)} control of ALL your NFTs in this collection.`
+        : `Revoke ${displayAddr(op, resolvedNames)}'s access to your NFTs.`;
       if (approved)
         flags.push({ level: "danger", message: "Grants control over an entire NFT collection." });
     } else if (parsed?.name === "transfer") {
       const [dest, amount] = parsed.args as unknown as [string, bigint];
-      summary = `Transfer ${amount} tokens to ${short(dest)}.`;
+      summary = `Transfer ${amount} tokens to ${displayAddr(dest, resolvedNames)}.`;
     }
   }
 
   // Cross-cutting checks (apply regardless of call type).
   const counterparty = extractCounterparty(to, tx.data);
   if (counterparty && !knownAddresses.has(counterparty.toLowerCase())) {
-    flags.push({ level: "warn", message: `New address you've never interacted with: ${short(counterparty)}.` });
+    flags.push({ level: "warn", message: `New address you've never interacted with: ${displayAddr(counterparty, resolvedNames)}.` });
   }
-  // TODO: lookalike/poisoned-address check (compare prefix+suffix against known addrs).
-  // TODO: chainId sanity (does it match the network the user thinks they're on?).
+
+  // ENS impersonation detection
+  if (resolvedNames) {
+    for (const [, resolved] of resolvedNames) {
+      if (resolved.impersonation) {
+        flags.push({
+          level: "danger",
+          message: `🚨 IMPERSONATION: "${resolved.name}" does NOT resolve to this address. Possible phishing attack!`,
+        });
+      }
+    }
+  }
 
   return { summary, flags, worstLevel: worst(flags) };
 }

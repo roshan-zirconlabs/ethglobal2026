@@ -8,6 +8,7 @@
  * difference is the signature comes from the card, not a host-held key.
  */
 import {
+  JsonRpcProvider,
   Signature,
   Transaction,
   TypedDataEncoder,
@@ -261,4 +262,69 @@ function hexToUtf8(hex: string): string {
   } catch {
     return hex;
   }
+}
+
+/**
+ * Sign a transaction with the card signer and broadcast it via RPC.
+ * Used for WalletConnect `eth_sendTransaction` where the wallet must return
+ * a transaction hash (not just a signed blob).
+ *
+ * @returns The transaction hash (0x...)
+ */
+export async function signAndBroadcast(
+  txParams: any,
+  card: CardSigner,
+  rpcUrl: string,
+): Promise<string> {
+  // Build a clean ethers tx
+  const txLike: Record<string, unknown> = {};
+  for (const field of ETHERS_TX_FIELDS) {
+    const value = txParams?.[field];
+    if (value !== undefined && value !== null) {
+      txLike[field] = field === 'type' ? Number(value) : value;
+    }
+  }
+
+  // Fill in missing fields from the network
+  const provider = new JsonRpcProvider(rpcUrl);
+  if (!txLike.chainId) {
+    const network = await provider.getNetwork();
+    txLike.chainId = Number(network.chainId);
+  }
+  if (!txLike.nonce) {
+    txLike.nonce = await provider.getTransactionCount(txParams.from);
+  }
+  if (!txLike.gasLimit) {
+    try {
+      txLike.gasLimit = await provider.estimateGas({
+        from: txParams.from,
+        to: txParams.to,
+        value: txParams.value,
+        data: txParams.data,
+      });
+    } catch {
+      txLike.gasLimit = 21000; // fallback for simple transfers
+    }
+  }
+
+  // Ensure EIP-1559 gas fields are set
+  if (!txLike.maxFeePerGas && !txLike.gasPrice) {
+    const feeData = await provider.getFeeData();
+    txLike.type = 2;
+    txLike.maxFeePerGas = feeData.maxFeePerGas;
+    txLike.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
+  }
+
+  const unsigned = Transaction.from(txLike);
+  const digest = unsigned.unsignedHash;
+
+  // Sign with the card
+  const sig = await card.signDigest(digest);
+
+  // Attach the signature
+  unsigned.signature = toEthersSig(sig);
+
+  // Broadcast
+  const response = await provider.broadcastTransaction(unsigned.serialized);
+  return response.hash;
 }

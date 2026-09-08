@@ -1,6 +1,12 @@
 /**
- * MFKDF signer for the phone. The key is DERIVED from (card id + password) with
- * scrypt, used to sign, and dropped — never stored, never leaves the phone.
+ * MFKDF signer — derives a private key from THREE factors:
+ *
+ *   1. Password (something you know — never stored)
+ *   2. NFC Card UID (something you have — read-only, any NFC card)
+ *   3. Device Secret (something you have — phone enclave, non-exportable)
+ *
+ * The key is derived, used to sign, then dropped — never stored.
+ * Same three factors = same key, every time (deterministic).
  *
  * KDF: scrypt (memory-hard, ships in ethers, the same family Ethereum keystores
  * use) — no native module needed, unlike Argon2/WASM.
@@ -12,6 +18,7 @@ import {
   scrypt,
   sha256,
   toUtf8Bytes,
+  hexlify,
 } from 'ethers';
 import type { BytesLike } from 'ethers';
 
@@ -30,23 +37,40 @@ export class MfkdfSigner implements CardSigner {
 
   readonly #password: string;
 
-  constructor(cardId: string, password: string, label = 'NFC Card') {
+  readonly #deviceSecret: string;
+
+  constructor(
+    cardId: string,
+    password: string,
+    deviceSecret: string,
+    label = 'NFC Card',
+  ) {
     if (!cardId) {
       throw new Error('Tap or enter a card first.');
     }
     if (!password) {
       throw new Error('Enter your password first.');
     }
+    if (!deviceSecret) {
+      throw new Error('Device secret not available — wallet setup may be incomplete.');
+    }
     this.#cardId = cardId;
     this.#password = password;
+    this.#deviceSecret = deviceSecret;
     this.label = label;
   }
 
   async #derivePrivateKey(): Promise<string> {
+    const subaccountTag =
+      this.label && this.label !== 'NFC Card' && this.label !== 'main'
+        ? `|${this.label}`
+        : '';
     for (let counter = 0; counter < 8; counter++) {
-      const salt = getBytes(
-        sha256(toUtf8Bytes(`notwallet|v1|${counter}|${this.#cardId}`)),
-      );
+      // Three-factor salt: cardUID + deviceSecret + optional subaccount tag + counter
+      // The device secret binds the key to THIS phone's hardware enclave.
+      // The card UID binds it to a physical card presence.
+      const saltInput = `${this.#cardId}|${this.#deviceSecret}${subaccountTag}|${counter}`;
+      const salt = getBytes(sha256(toUtf8Bytes(saltInput)));
       const hex = await scrypt(
         toUtf8Bytes(this.#password),
         salt,
@@ -65,6 +89,19 @@ export class MfkdfSigner implements CardSigner {
       }
     }
     throw new Error('Key derivation failed.');
+  }
+
+  /**
+   * Execute an operation with the derived key in a scoped callback.
+   * Key is never exposed outside the callback or persisted.
+   */
+  async executeWithKey<T>(fn: (privateKey: string) => Promise<T>): Promise<T> {
+    const key = await this.#derivePrivateKey();
+    try {
+      return await fn(key);
+    } finally {
+      // key variable goes out of scope and will be GC'd
+    }
   }
 
   async getIdentity(): Promise<CardIdentity> {

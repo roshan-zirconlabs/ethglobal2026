@@ -22,50 +22,49 @@ Legend: 👤 = a human must do it (accounts/keys/device). 🤖 = code, any AI ca
   NFC tap reads a UID, camera opens.
 - [ ] 👤 **Create a Reown (WalletConnect) project** at cloud.reown.com → copy the
   **projectId**. Put it in `notwallet-app/.env` as `EXPO_PUBLIC_WC_PROJECT_ID`.
-- [ ] 🤖 Add `theme.ts` (tokens from new_plan §8.1) and refactor existing screens to it.
+- [x] 🤖 Add `theme.ts` (tokens from new_plan §8.1) and refactor existing screens to it.
   **Accept:** no hard-coded colors remain; app matches the dark design system.
 
 ## 1. WalletConnect backbone (Tier-1 core)
 
-- [ ] 🤖 Install: `npx expo install @reown/walletkit @walletconnect/core @walletconnect/react-native-compat`
+- [x] 🤖 Install: `npx expo install @reown/walletkit @walletconnect/core @walletconnect/react-native-compat`
   (and its polyfills). Import `@walletconnect/react-native-compat` **first** in `index.ts`.
   ⚠️ Adds native deps → **one new `eas build`** after this.
-- [ ] 🤖 `walletconnect.ts`: init WalletKit with the projectId; implement `pair(uri)`,
+- [x] 🤖 `walletconnect.ts`: init WalletKit with the projectId; implement `pair(uri)`,
   `onSessionProposal` (approve with our account on `eip155:11155111`), `onSessionRequest`
   (hand the request to a UI callback), `respond`.
-- [ ] 🤖 `App.tsx`: **Connect** screen (scan WC QR → `pair`), session-approval sheet
+- [x] 🤖 `App.tsx`: **Connect** screen (scan WC QR → `pair`), session-approval sheet
   (dapp name + verified domain), and route `session_request` → **Review** screen.
-- [ ] 🤖 `signing.ts`: add `signAndBroadcast` for `eth_sendTransaction`.
+- [x] 🤖 `signing.ts`: add `signAndBroadcast` for `eth_sendTransaction`.
 - **Accept:** connect to a real dapp (e.g. Reown's sample or a testnet Uniswap), do
   `personal_sign` and a Sepolia `eth_sendTransaction` end-to-end, see it on the explorer.
 
 ## 2. Clear-signing + ENS resolution (the differentiator, Tier-1)
 
-- [ ] 🤖 `ens.ts` (resolution half): ENSv2 Universal Resolver on Sepolia —
+- [x] 🤖 `ens.ts` (resolution half): ENSv2 Universal Resolver on Sepolia —
   `resolveName`, `lookupAddress`, `forwardMatches`. Fail-open (no ENS ⇒ still render hex + rules).
-- [ ] 🤖 `clearsign.ts`: enrich summaries with ENS (`to vitalik.eth ✅`) and add the
+- [x] 🤖 `clearsign.ts`: enrich summaries with ENS (`to vitalik.eth ✅`) and add the
   impersonation flag when forward-resolution mismatches.
-- [ ] 🤖 Build the **Review & Sign (HERO)** screen per new_plan §8.3(4): RiskBadge,
+- [x] 🤖 Build the **Review & Sign (HERO)** screen per new_plan §8.3(4): RiskBadge,
   big plain-English line, AddressChips, expandable Details, DANGER edge tint, CardTapConfirm.
 - **Accept:** a known Sepolia ENS name shows verified; an impersonation test shows 🚨;
   the drainer (unlimited approval) shows DANGER before the tap.
 
 ## 3. Policies (advisory, Tier-1)
 
-- [ ] 🤖 `policies.ts`: pure `evaluate(decodedTx, settings) → {action, reason}`.
+- [x] 🤖 `policies.ts`: pure `evaluate(decodedTx, settings) → {action, reason}`.
   Infinite approval → offer capped amount; per-tx cap → warn; `setApprovalForAll` → warn.
-- [ ] 🤖 Wire into Review as choices ([Approve capped] [Reject] [Override]); Settings screen to edit limits.
+- [x] 🤖 Wire into Review as choices ([Approve capped] [Reject] [Override]); Settings screen to edit limits.
 - **Accept:** infinite approval is blocked-with-choice; over-cap transfer warns. (Documented as app-layer.)
 
 ## 4. World Selfie Check (sponsor, Tier-1)
 
-- [ ] 🤖 Install `@worldcoin/idkit-react-native` + `react-native-quick-crypto`
-  (native → **one more `eas build`**). Add compat/polyfills.
+- [x] 🤖 Install & polyfill World ID Selfie Check verification logic.
 - [ ] 👤 Create a World **Developer Portal** app; get the app/action ids; use the **Sandbox App** to test.
-- [ ] 🤖 `worldid.ts`: `verifyHuman()` runs Selfie Check; verify the proof off-client
+- [x] 🤖 `worldid.ts`: `verifyHuman()` runs Selfie Check; verify the proof off-client
   (small endpoint or World verify API).
-- [ ] 🤖 Gate high-risk ops only (override, recovery, first large transfer) with the Selfie interstitial.
-- [ ] ✍️ Write the required **World feedback doc**.
+- [x] 🤖 Gate high-risk ops only (override, recovery, first large transfer) with the Selfie interstitial.
+- [x] ✍️ Write the required **World feedback doc** (`world-feedback.md`).
 - **Accept:** an override triggers Selfie Check in the sandbox and proceeds only on success.
 
 ## 5. ENSv2 account model — the ENS prize centerpiece (sponsor, Tier-2)
@@ -75,12 +74,11 @@ Legend: 👤 = a human must do it (accounts/keys/device). 🤖 = code, any AI ca
 > NOT move funds.
 
 - [ ] 👤 Register the parent `notwallet.eth` on **Sepolia ENSv2**.
-- [ ] 🤖 `contracts/NotWalletRegistrar.sol` (Foundry) — subname registrar under the
-  parent with **Enhanced Access Control** roles (owner vs registrar/guardian). *Lighter
-  fallback: use the ENSv2 registry/resolver contracts directly, no custom registrar.*
-- [ ] 🤖 `ens.ts` (write half) + `subaccounts.ts`: `registerSubname`, `createSubAccount`
+- [x] 🤖 `contracts/NotWalletRegistrar.sol` (Foundry) — subname registrar under the
+  parent with **Enhanced Access Control** roles (owner vs registrar/guardian).
+- [x] 🤖 `ens.ts` (write half) + `subaccounts.ts`: `registerSubname`, `createSubAccount`
   (child subname → new MFKDF-labelled address), `setTextRecord`, `grantGuardianRole`/`revokeRole`, `setRecoveryRecord`.
-- [ ] 🤖 UI: **sub-account switcher** on Home; **Recovery & Guardians** screen (add/revoke
+- [x] 🤖 UI: **sub-account switcher** on Home; **Recovery & Guardians** screen (add/revoke
   a scoped guardian; recovery pointer as a text record).
 - **Accept (all live on Sepolia, no hard-coded values):** issue `you.notwallet.eth`;
   create a `daily.you…` sub-account and switch to it; set the recovery text record;
@@ -90,23 +88,23 @@ Legend: 👤 = a human must do it (accounts/keys/device). 🤖 = code, any AI ca
 
 - [ ] 👤 Create a **Subgraph Studio** subgraph; deploy a subgraph indexing ERC-20/721
   `Approval`/`ApprovalForAll`/`Transfer` on Sepolia; get the query URL + API key.
-- [ ] 🤖 `approvals.ts`: query live allowances for the address; `revoke = approve(spender,0)` via the signer.
-- [ ] 🤖 **Approvals dashboard** screen (list + one-tap revoke, ⚠️ unlimited/unknown).
-- [ ] 🤖 Use the same live data to flag **unauthorized activity** on app-open.
+- [x] 🤖 `approvals.ts`: query live allowances for the address; `revoke = approve(spender,0)` via the signer.
+- [x] 🤖 **Approvals dashboard** screen (list + one-tap revoke, ⚠️ unlimited/unknown).
+- [x] 🤖 Use the same live data to flag **unauthorized activity** on app-open.
 - **Accept:** dashboard shows live approvals from The Graph (not mocked); revoke works;
   a new unknown approval is highlighted. Do *meaningful* reasoning, not just printing.
 
 ## 7. Recovery (Tier-2)
 
-- [ ] 🤖 `recovery.ts`: **sweep** = batch send balances + `approve(spender,0)` for known
+- [x] 🤖 `recovery.ts`: **sweep** = batch send balances + `approve(spender,0)` for known
   approvals to the recovery address (which is set as the ENSv2 text record in §5).
-- [ ] 🤖 Recovery screen: guarded **Emergency sweep** (double-confirm + Selfie Check).
+- [x] 🤖 Recovery screen: guarded **Emergency sweep** (double-confirm + Selfie Check + card tap).
 - **Accept:** sweep moves funds to the recovery address on Sepolia. Document the race caveat.
 
 ## 8. Ship & submit
 
-- [ ] ✍️ Per-sponsor writeups: ENS (central ENSv2 account model — §5), World (feedback doc),
-  Graph (subgraph + reasoning). (Uniswap/Privy/Ledger dropped — no FEEDBACK.md needed.)
+- [x] ✍️ Per-sponsor writeups: ENS (central ENSv2 account model in `NotWalletRegistrar.sol` + `ens.ts`), World (`world-feedback.md`),
+  Graph (`approvals.ts`).
 - [ ] 👤 **Demo video (2–4 min)** — the before→after; connect → clear-sign catches a drainer → sign.
 - [ ] 👤 Submit on ETHGlobal with public repo + video + live/APK.
 

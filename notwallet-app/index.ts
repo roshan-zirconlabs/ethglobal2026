@@ -1,4 +1,10 @@
-// MUST be first: provides crypto.getRandomValues for ethers key ops in RN.
+// WalletConnect React Native compatibility — MUST be first import.
+import '@walletconnect/react-native-compat';
+
+// Polyfills required for WalletConnect in React Native
+import 'fast-text-encoding';
+
+// MUST be before ethers: provides crypto.getRandomValues for key ops in RN.
 import 'react-native-get-random-values';
 
 import { registerRootComponent } from 'expo';
