@@ -1,12 +1,13 @@
 /**
- * MFKDF signer — derives a private key from THREE factors:
+ * MFKDF signer — derives a private key from TWO factors:
  *
  *   1. Password (something you know — never stored)
  *   2. NFC Card UID (something you have — read-only, any NFC card)
- *   3. Device Secret (something you have — phone enclave, non-exportable)
  *
- * The key is derived, used to sign, then dropped — never stored.
- * Same three factors = same key, every time (deterministic).
+ * The key is derived, used to sign, then dropped — never stored. Same two factors
+ * = same key on ANY phone → the wallet is recoverable with no seed phrase and no
+ * device lock-in. (An optional device-bound 3rd factor exists behind an *encrypted
+ * backup* only — see device-secret.ts — never as a silent, unrecoverable factor.)
  *
  * KDF: scrypt (memory-hard, ships in ethers, the same family Ethereum keystores
  * use) — no native module needed, unlike Argon2/WASM.
@@ -18,7 +19,6 @@ import {
   scrypt,
   sha256,
   toUtf8Bytes,
-  hexlify,
 } from 'ethers';
 import type { BytesLike } from 'ethers';
 
@@ -37,26 +37,15 @@ export class MfkdfSigner implements CardSigner {
 
   readonly #password: string;
 
-  readonly #deviceSecret: string;
-
-  constructor(
-    cardId: string,
-    password: string,
-    deviceSecret: string,
-    label = 'NFC Card',
-  ) {
+  constructor(cardId: string, password: string, label = 'NFC Card') {
     if (!cardId) {
       throw new Error('Tap or enter a card first.');
     }
     if (!password) {
       throw new Error('Enter your password first.');
     }
-    if (!deviceSecret) {
-      throw new Error('Device secret not available — wallet setup may be incomplete.');
-    }
     this.#cardId = cardId;
     this.#password = password;
-    this.#deviceSecret = deviceSecret;
     this.label = label;
   }
 
@@ -66,10 +55,10 @@ export class MfkdfSigner implements CardSigner {
         ? `|${this.label}`
         : '';
     for (let counter = 0; counter < 8; counter++) {
-      // Three-factor salt: cardUID + deviceSecret + optional subaccount tag + counter
-      // The device secret binds the key to THIS phone's hardware enclave.
-      // The card UID binds it to a physical card presence.
-      const saltInput = `${this.#cardId}|${this.#deviceSecret}${subaccountTag}|${counter}`;
+      // Two-factor salt: cardUID + optional subaccount tag + counter.
+      // The password (scrypt input) is the entropy anchor; the card UID is the
+      // physical "have" factor. Recoverable from the same two on any device.
+      const saltInput = `${this.#cardId}${subaccountTag}|${counter}`;
       const salt = getBytes(sha256(toUtf8Bytes(saltInput)));
       const hex = await scrypt(
         toUtf8Bytes(this.#password),

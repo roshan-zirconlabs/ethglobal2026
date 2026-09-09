@@ -65,13 +65,12 @@ const ACTIVE_SUBACCOUNT_KEY = 'notwallet.active_subaccount.v1';
 export async function deriveStandardSubaccounts(
   cardId: string,
   password: string,
-  deviceSecret: string,
   parentEnsName?: string,
 ): Promise<SubAccount[]> {
   const accounts: SubAccount[] = [];
 
   for (const item of STANDARD_SUBACCOUNTS) {
-    const signer = new MfkdfSigner(cardId, password, deviceSecret, item.purpose);
+    const signer = new MfkdfSigner(cardId, password, item.purpose);
     const identity = await signer.getIdentity();
 
     const ensSubname = parentEnsName

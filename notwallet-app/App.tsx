@@ -22,7 +22,6 @@ import {
   type ResolvedNames,
   type RiskLevel,
 } from './src/clearsign';
-import { getOrCreateDeviceSecret } from './src/device-secret';
 import { resolveAddress, resolveAddresses, type ResolvedIdentity } from './src/ens';
 import { MfkdfSigner } from './src/mfkdf';
 import { startMonitoring, stopMonitoring, recordLocalTransaction, sendSpendingNotification } from './src/monitor';
@@ -140,7 +139,6 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [permission, requestPermission] = useCameraPermissions();
-  const deviceSecretRef = useRef<string>('');
 
   // Tangem-style NFC Modal & Sheet State
   const [nfcVisible, setNfcVisible] = useState(false);
@@ -304,15 +302,12 @@ export default function App() {
     setBusy(true);
 
     try {
-      const deviceSecret = deviceSecretRef.current || (await getOrCreateDeviceSecret());
-      deviceSecretRef.current = deviceSecret;
-
       if (nfcPurpose === 'setup') {
         if (!password || password.length < 6) {
           throw new Error('Please choose a password with at least 6 characters.');
         }
 
-        const signer = new MfkdfSigner(cardId, password, deviceSecret);
+        const signer = new MfkdfSigner(cardId, password);
         const identity = await signer.getIdentity();
 
         await addCard({
@@ -322,7 +317,7 @@ export default function App() {
           publicKey: identity.publicKey,
         });
 
-        const envelopes = await deriveStandardSubaccounts(cardId, password, deviceSecret);
+        const envelopes = await deriveStandardSubaccounts(cardId, password);
         setSubaccounts(envelopes);
 
         setAccount({ address: identity.address, publicKey: identity.publicKey });
@@ -339,7 +334,7 @@ export default function App() {
 
         startMonitoring(identity.address);
       } else if (nfcPurpose === 'unlock') {
-        const signer = new MfkdfSigner(cardId, password, deviceSecret);
+        const signer = new MfkdfSigner(cardId, password);
         const identity = await signer.getIdentity();
 
         const savedWallet = await loadWallet();
@@ -353,7 +348,7 @@ export default function App() {
           await setActiveCard(cardIdx);
         }
 
-        const envelopes = await deriveStandardSubaccounts(cardId, password, deviceSecret);
+        const envelopes = await deriveStandardSubaccounts(cardId, password);
         setSubaccounts(envelopes);
 
         setLocked(false);
@@ -371,7 +366,7 @@ export default function App() {
           if (!res.success) throw new Error('Biometric check cancelled.');
         }
 
-        const signer = new MfkdfSigner(cardId, password, deviceSecret, activeSubaccount);
+        const signer = new MfkdfSigner(cardId, password, activeSubaccount);
         const preview = previewRequest(request);
 
         if (preview.kind === 'tx' && request.request.method === 'eth_sendTransaction') {
@@ -413,7 +408,7 @@ export default function App() {
         setScreen('home');
         void fetchBalance(account.address);
       } else if (nfcPurpose === 'sweep') {
-        const signer = new MfkdfSigner(cardId, password, deviceSecret);
+        const signer = new MfkdfSigner(cardId, password);
         const result = await executeEmergencyRecovery(signer);
         setRecoveryStatusResult(result);
         if (account) void fetchBalance(account.address);

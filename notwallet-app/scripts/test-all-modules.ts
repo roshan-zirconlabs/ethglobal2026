@@ -48,17 +48,17 @@ async function runTests() {
   const pass1 = 'TestPass123!#';
   const secret1 = '0x1111111111111111111111111111111111111111111111111111111111111111';
 
-  const signer1 = new MfkdfSigner(cardId1, pass1, secret1, 'main');
+  const signer1 = new MfkdfSigner(cardId1, pass1, 'main');
   const id1 = await signer1.getIdentity();
 
-  const signer2 = new MfkdfSigner(cardId1, pass1, secret1, 'main');
+  const signer2 = new MfkdfSigner(cardId1, pass1, 'main');
   const id2 = await signer2.getIdentity();
 
   assert(id1.address.startsWith('0x') && id1.address.length === 42, 'Address is valid 42-char hex');
   assert(id1.address.toLowerCase() === id2.address.toLowerCase(), 'Deterministic: same inputs produce identical address');
 
   // Subaccount test (Daily vs Main)
-  const signerDaily = new MfkdfSigner(cardId1, pass1, secret1, 'daily');
+  const signerDaily = new MfkdfSigner(cardId1, pass1, 'daily');
   const idDaily = await signerDaily.getIdentity();
   assert(idDaily.address.toLowerCase() !== id1.address.toLowerCase(), 'Subaccounts: daily envelope produces distinct address from same card');
 
