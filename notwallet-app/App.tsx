@@ -1,7 +1,14 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { JsonRpcProvider, formatEther, parseEther } from 'ethers';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+
+import {
+  AuthScreen,
+  ConnectScreen,
+  HomeScreen,
+  ReviewScreen,
+} from './src/screens';
 import {
   ActivityIndicator,
   Alert,
@@ -631,421 +638,71 @@ export default function App() {
 
         {/* ---- Setup Screen (Tangem-Style Clean Flow) ---- */}
         {screen === 'setup' && (
-          <View style={styles.setupContainer}>
-            <View style={styles.setupHeroCard}>
-              <Text style={styles.setupHeroIcon}>💳</Text>
-              <Text style={styles.setupHeroTitle}>Hardware Security</Text>
-              <Text style={styles.setupHeroSubtitle}>
-                Derived on-demand from your password and any physical NFC card. Nothing is ever stored at rest.
-              </Text>
-            </View>
-
-            <View style={styles.setupForm}>
-              <Text style={styles.fieldLabel}>Set Master Password</Text>
-              <TextInput
-                style={styles.passwordInput}
-                placeholder="Enter password (min 6 characters)"
-                placeholderTextColor={colors.textDim}
-                secureTextEntry
-                value={password}
-                onChangeText={setPassword}
-              />
-
-              <TouchableOpacity
-                style={styles.primaryActionButton}
-                onPress={() => openNfcScan('setup')}
-                disabled={busy}
-              >
-                <Text style={styles.actionButtonIcon}>📇</Text>
-                <Text style={styles.primaryActionText}>Tap NFC Card to Initialize</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          <AuthScreen
+            mode="setup"
+            password={password}
+            onPassword={setPassword}
+            onTapCard={() => openNfcScan('setup')}
+            busy={busy}
+          />
         )}
 
         {/* ---- Unlock Screen ---- */}
         {screen === 'unlock' && (
-          <View style={styles.setupContainer}>
-            <View style={styles.setupHeroCard}>
-              <Text style={styles.setupHeroIcon}>🔒</Text>
-              <Text style={styles.setupHeroTitle}>Wallet Locked</Text>
-              <Text style={styles.setupHeroSubtitle}>
-                Enter your password and tap your card to regenerate your signing key.
-              </Text>
-            </View>
-
-            <View style={styles.setupForm}>
-              <Text style={styles.fieldLabel}>Master Password</Text>
-              <TextInput
-                style={styles.passwordInput}
-                placeholder="Enter your password"
-                placeholderTextColor={colors.textDim}
-                secureTextEntry
-                value={password}
-                onChangeText={setPassword}
-              />
-
-              <TouchableOpacity
-                style={styles.primaryActionButton}
-                onPress={() => openNfcScan('unlock')}
-                disabled={busy}
-              >
-                <Text style={styles.actionButtonIcon}>📇</Text>
-                <Text style={styles.primaryActionText}>Tap NFC Card to Unlock</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.cancelLink}
-                onPress={() => setScreen('home')}
-              >
-                <Text style={styles.cancelLinkText}>View Portfolio (Read-only)</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          <AuthScreen
+            mode="unlock"
+            password={password}
+            onPassword={setPassword}
+            onTapCard={() => openNfcScan('unlock')}
+            onReadonly={() => setScreen('home')}
+            busy={busy}
+          />
         )}
 
         {/* ---- Home Portfolio Dashboard (World-Class Wallet Feel) ---- */}
-        {screen === 'home' && account && (
-          <>
-            {/* Money Envelopes (Subaccounts) Switcher Carousel */}
-            <View style={styles.envelopeCarousel}>
-              {STANDARD_SUBACCOUNTS.map((sub) => (
-                <TouchableOpacity
-                  key={sub.purpose}
-                  style={[
-                    styles.envelopeTab,
-                    activeSubaccount === sub.purpose && styles.envelopeTabActive,
-                  ]}
-                  onPress={() => onSwitchSubaccount(sub.purpose)}
-                >
-                  <Text style={styles.envelopeTabIcon}>{sub.icon}</Text>
-                  <Text
-                    style={[
-                      styles.envelopeTabText,
-                      activeSubaccount === sub.purpose && styles.envelopeTabTextActive,
-                    ]}
-                  >
-                    {sub.label.split(' ')[0]}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Main Portfolio Balance Card */}
-            <View style={styles.portfolioHeroCard}>
-              <Text style={styles.portfolioLabel}>TOTAL PORTFOLIO</Text>
-              <Text style={styles.portfolioFiat}>{fiatBalance}</Text>
-              <View style={styles.portfolioEthRow}>
-                <Text style={styles.portfolioEth}>{balance} ETH</Text>
-                <View style={styles.trendBadge}>
-                  <Text style={styles.trendBadgeText}>▲ +3.4%</Text>
-                </View>
-              </View>
-
-              {/* 4 Circular Action Buttons (Phantom/Rainbow style) */}
-              <View style={styles.quickActionsRow}>
-                <TouchableOpacity
-                  style={styles.actionCircleButton}
-                  onPress={() => (locked ? setScreen('unlock') : setSendVisible(true))}
-                >
-                  <View style={styles.actionIconCircle}>
-                    <Text style={styles.actionCircleIconText}>⬆️</Text>
-                  </View>
-                  <Text style={styles.actionCircleLabel}>Send</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.actionCircleButton}
-                  onPress={() => setReceiveVisible(true)}
-                >
-                  <View style={styles.actionIconCircle}>
-                    <Text style={styles.actionCircleIconText}>⬇️</Text>
-                  </View>
-                  <Text style={styles.actionCircleLabel}>Receive</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.actionCircleButton}
-                  onPress={() => (locked ? setScreen('unlock') : setScreen('connect'))}
-                >
-                  <View style={[styles.actionIconCircle, styles.actionIconCircleBrand]}>
-                    <Text style={styles.actionCircleIconText}>📷</Text>
-                  </View>
-                  <Text style={styles.actionCircleLabel}>Connect</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.actionCircleButton}
-                  onPress={onScanApprovals}
-                >
-                  <View style={styles.actionIconCircle}>
-                    <Text style={styles.actionCircleIconText}>🛡️</Text>
-                  </View>
-                  <Text style={styles.actionCircleLabel}>Shield</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Connected Dapps Section (If any) */}
-            {sessionList.length > 0 && (
-              <View style={styles.connectedDappsCard}>
-                <View style={styles.dappHeaderRow}>
-                  <Text style={styles.dappSectionTitle}>CONNECTED DAPPS</Text>
-                  <View style={styles.dappCountPill}>
-                    <Text style={styles.dappCountText}>{sessionList.length}</Text>
-                  </View>
-                </View>
-                {sessionList.map(([topic, session]) => (
-                  <View key={topic} style={styles.sessionRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.sessionDappName}>
-                        {(session as any)?.peer?.metadata?.name ?? 'Web3 Dapp'}
-                      </Text>
-                      <Text style={styles.sessionDappUrl}>
-                        {(session as any)?.peer?.metadata?.url ?? ''}
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      style={styles.disconnectButton}
-                      onPress={async () => {
-                        await disconnectSession(topic);
-                        refreshSessions();
-                      }}
-                    >
-                      <Text style={styles.disconnectButtonText}>Disconnect</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            {/* Segmented Tabs: Assets & Activity */}
-            <View style={styles.segmentedTabBar}>
-              <TouchableOpacity
-                style={[
-                  styles.tabButton,
-                  activeTab === 'assets' && styles.tabButtonActive,
-                ]}
-                onPress={() => setActiveTab('assets')}
-              >
-                <Text
-                  style={[
-                    styles.tabButtonText,
-                    activeTab === 'assets' && styles.tabButtonTextActive,
-                  ]}
-                >
-                  Tokens
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.tabButton,
-                  activeTab === 'activity' && styles.tabButtonActive,
-                ]}
-                onPress={() => setActiveTab('activity')}
-              >
-                <Text
-                  style={[
-                    styles.tabButtonText,
-                    activeTab === 'activity' && styles.tabButtonTextActive,
-                  ]}
-                >
-                  Activity
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Assets List */}
-            {activeTab === 'assets' && (
-              <View style={styles.assetsListContainer}>
-                {/* Ethereum */}
-                <View style={styles.tokenRow}>
-                  <View style={styles.tokenIconBadge}>
-                    <Text style={styles.tokenEmoji}>⟠</Text>
-                  </View>
-                  <View style={styles.tokenMeta}>
-                    <Text style={styles.tokenSymbol}>Ethereum</Text>
-                    <Text style={styles.tokenNetwork}>Sepolia Testnet</Text>
-                  </View>
-                  <View style={styles.tokenBalanceCol}>
-                    <Text style={styles.tokenBalanceAmount}>{balance} ETH</Text>
-                    <Text style={styles.tokenBalanceFiat}>{fiatBalance}</Text>
-                  </View>
-                </View>
-
-                {/* USDC */}
-                <View style={styles.tokenRow}>
-                  <View style={[styles.tokenIconBadge, { backgroundColor: '#1E3A8A' }]}>
-                    <Text style={styles.tokenEmoji}>💲</Text>
-                  </View>
-                  <View style={styles.tokenMeta}>
-                    <Text style={styles.tokenSymbol}>USD Coin</Text>
-                    <Text style={styles.tokenNetwork}>USDC • Sepolia</Text>
-                  </View>
-                  <View style={styles.tokenBalanceCol}>
-                    <Text style={styles.tokenBalanceAmount}>150.00 USDC</Text>
-                    <Text style={styles.tokenBalanceFiat}>$150.00</Text>
-                  </View>
-                </View>
-
-                {/* WETH */}
-                <View style={styles.tokenRow}>
-                  <View style={[styles.tokenIconBadge, { backgroundColor: '#312E81' }]}>
-                    <Text style={styles.tokenEmoji}>⚡</Text>
-                  </View>
-                  <View style={styles.tokenMeta}>
-                    <Text style={styles.tokenSymbol}>Wrapped Ether</Text>
-                    <Text style={styles.tokenNetwork}>WETH • Sepolia</Text>
-                  </View>
-                  <View style={styles.tokenBalanceCol}>
-                    <Text style={styles.tokenBalanceAmount}>0.50 WETH</Text>
-                    <Text style={styles.tokenBalanceFiat}>$1,200.00</Text>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {/* Activity List */}
-            {activeTab === 'activity' && (
-              <View style={styles.assetsListContainer}>
-                <View style={styles.activityItem}>
-                  <View style={styles.activityIconBadge}>
-                    <Text style={styles.activityEmoji}>🔗</Text>
-                  </View>
-                  <View style={styles.tokenMeta}>
-                    <Text style={styles.tokenSymbol}>Wallet Initialized</Text>
-                    <Text style={styles.tokenNetwork}>Hardware MFKDF • Ready</Text>
-                  </View>
-                  <Text style={styles.activityStatusTag}>Active</Text>
-                </View>
-
-                {sessionList.length > 0 && (
-                  <View style={styles.activityItem}>
-                    <View style={styles.activityIconBadge}>
-                      <Text style={styles.activityEmoji}>⚡</Text>
-                    </View>
-                    <View style={styles.tokenMeta}>
-                      <Text style={styles.tokenSymbol}>WalletConnect Session</Text>
-                      <Text style={styles.tokenNetwork}>Connected to Dapp</Text>
-                    </View>
-                    <Text style={[styles.activityStatusTag, { color: colors.ok }]}>Live</Text>
-                  </View>
-                )}
-              </View>
-            )}
-          </>
+                {screen === 'home' && account && (
+          <HomeScreen
+            balance={balance}
+            fiat={fiatBalance}
+            locked={locked}
+            subaccounts={STANDARD_SUBACCOUNTS}
+            activeSubaccount={activeSubaccount}
+            onSwitch={(p) => onSwitchSubaccount(p as SubAccountPurpose)}
+            onSend={() => (locked ? setScreen('unlock') : setSendVisible(true))}
+            onReceive={() => setReceiveVisible(true)}
+            onConnect={() => (locked ? setScreen('unlock') : setScreen('connect'))}
+            onShield={onScanApprovals}
+            sessions={sessionList}
+            onDisconnect={async (topic) => {
+              await disconnectSession(topic);
+              refreshSessions();
+            }}
+          />
         )}
 
         {/* ---- WalletConnect Scanner Screen ---- */}
-        {screen === 'connect' && (
-          <View style={styles.scannerWrapper}>
-            <View style={styles.scannerHeader}>
-              <Text style={styles.scannerTitle}>Scan WalletConnect QR</Text>
-              <Text style={styles.scannerSub}>
-                Scan the QR code shown on any desktop or mobile Web3 dapp.
-              </Text>
-            </View>
-
-            {!permission?.granted ? (
-              <TouchableOpacity style={styles.primaryActionButton} onPress={requestPermission}>
-                <Text style={styles.primaryActionText}>Enable Camera Permission</Text>
-              </TouchableOpacity>
-            ) : (
-              <View style={styles.cameraBox}>
-                <CameraView
-                  style={{ flex: 1 }}
-                  barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-                  onBarcodeScanned={(e) => onScannedWcUri(e.data)}
-                />
-              </View>
-            )}
-
-            <TouchableOpacity style={styles.cancelLink} onPress={() => setScreen('home')}>
-              <Text style={styles.cancelLinkText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
+                {screen === 'connect' && (
+          <ConnectScreen
+            granted={permission?.granted ?? false}
+            onRequestPermission={requestPermission}
+            onScan={onScannedWcUri}
+            onCancel={() => setScreen('home')}
+          />
         )}
 
         {/* ---- Clear-Signing Review Screen (HERO Experience) ---- */}
-        {screen === 'review' && summary && (
-          <View style={styles.reviewContainer}>
-            {/* Dapp & Risk Banner */}
-            <View style={styles.reviewHeroHeader}>
-              <View
-                style={[
-                  styles.riskPill,
-                  summary.result?.worstLevel === 'danger' && styles.riskPillDanger,
-                  summary.result?.worstLevel === 'warn' && styles.riskPillWarn,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.riskPillText,
-                    summary.result && { color: RISK_COLOR[summary.result.worstLevel] },
-                  ]}
-                >
-                  {summary.result ? `${summary.result.worstLevel.toUpperCase()} RISK` : 'TRANSACTION REVIEW'}
-                </Text>
-              </View>
-              {wcEvent && (
-                <Text style={styles.dappOriginText}>
-                  Requested by: {(wcEvent as any)?.params?.proposer?.metadata?.name ?? 'Web3 Dapp'}
-                </Text>
-              )}
-            </View>
-
-            {/* Plain-English Transaction Sentence */}
-            <View style={styles.summaryCard}>
-              <Text style={styles.plainEnglishSummary}>
-                {summary.result ? summary.result.summary : summary.fallback}
-              </Text>
-
-              {/* Risk Flags List */}
-              {summary.result?.flags.map((flag, index) => (
-                <View
-                  key={index}
-                  style={[
-                    styles.riskFlagCard,
-                    flag.level === 'danger' && styles.riskFlagCardDanger,
-                    flag.level === 'warn' && styles.riskFlagCardWarn,
-                  ]}
-                >
-                  <Text style={{ color: RISK_COLOR[flag.level], fontSize: 13, fontWeight: '600' }}>
-                    {flag.level === 'danger' ? '🚨' : '⚠️'} {flag.message}
-                  </Text>
-                </View>
-              ))}
-            </View>
-
-            {/* Password input if wallet was locked */}
-            {!password && (
-              <View style={{ marginVertical: 10 }}>
-                <Text style={styles.fieldLabel}>Enter Password to Authorize</Text>
-                <TextInput
-                  style={styles.passwordInput}
-                  placeholder="Master password"
-                  placeholderTextColor={colors.textDim}
-                  secureTextEntry
-                  value={password}
-                  onChangeText={setPassword}
-                />
-              </View>
-            )}
-
-            {/* Primary Tangem-Style NFC Tap to Sign Button */}
-            <TouchableOpacity
-              style={styles.primaryActionButton}
-              onPress={() => openNfcScan('sign')}
-              disabled={busy}
-            >
-              <Text style={styles.actionButtonIcon}>📇</Text>
-              <Text style={styles.primaryActionText}>Tap NFC Card to Sign</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.rejectButton} onPress={onReject}>
-              <Text style={styles.rejectButtonText}>Reject Transaction</Text>
-            </TouchableOpacity>
-          </View>
+                {screen === 'review' && summary && (
+          <ReviewScreen
+            result={summary.result}
+            fallback={summary.fallback}
+            dappName={(wcEvent as any)?.params?.proposer?.metadata?.name}
+            needsPassword={!password}
+            password={password}
+            onPassword={setPassword}
+            onSign={() => openNfcScan('sign')}
+            onReject={onReject}
+            busy={busy}
+          />
         )}
 
         {/* ---- Token Approvals Dashboard Screen ---- */}
