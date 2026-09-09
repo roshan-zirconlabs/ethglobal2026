@@ -53,6 +53,14 @@ export const spacing = {
   huge: 48,
 };
 
+// Cinematic gradients (blue → dark), used for the hero card + onboarding bg.
+export const gradients = {
+  hero: ['#2F6BFF', '#0A0F1E'] as const,
+  card: ['#3B82F6', '#0B1020'] as const,
+  onboard: ['#1E48C8', '#08090F'] as const,
+  danger: ['#FF5A65', '#2A1518'] as const,
+};
+
 export const shadow = {
   card: {
     shadowColor: '#000',

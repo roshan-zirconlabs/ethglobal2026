@@ -9,6 +9,8 @@ import {
   HomeScreen,
   ReviewScreen,
 } from './src/screens';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GradientBackdrop } from './src/ui/visual';
 import {
   ActivityIndicator,
   Alert,
@@ -537,6 +539,7 @@ export default function App() {
   const sessionList = Object.entries(sessions);
 
   return (
+    <SafeAreaProvider>
     <View style={styles.root}>
       <StatusBar barStyle="light-content" />
 
@@ -588,80 +591,32 @@ export default function App() {
         onClose={() => setLogModalVisible(false)}
       />
 
-      <ScrollView contentContainerStyle={styles.container}>
-        {/* Top Header Bar */}
-        <View style={styles.header}>
-          {account ? (
-            <TouchableOpacity style={styles.identityPill} onPress={copyAddressToClipboard}>
-              <View style={styles.avatarCircle}>
-                <Text style={styles.avatarLetter}>
-                  {(ensName ? ensName[0] : account.address.slice(2, 3)).toUpperCase()}
-                </Text>
-              </View>
-              <Text style={styles.identityText}>
-                {ensName || short(account.address)}
-              </Text>
-              <Text style={styles.copyIcon}>{copiedAddr ? '✓' : '⎘'}</Text>
-            </TouchableOpacity>
-          ) : (
-            <View>
-              <Text style={styles.brandTitle}>NotWallet</Text>
-              <Text style={styles.brandSubtitle}>Hardware Security • Seedless</Text>
+      {screen === 'setup' || screen === 'unlock' ? (
+        <AuthScreen
+          mode={screen === 'setup' ? 'setup' : 'unlock'}
+          password={password}
+          onPassword={setPassword}
+          onTapCard={() => openNfcScan(screen === 'setup' ? 'setup' : 'unlock')}
+          onReadonly={screen === 'unlock' ? () => setScreen('home') : undefined}
+          busy={busy}
+        />
+      ) : (
+      <View style={{ flex: 1 }}>
+        <GradientBackdrop from={colors.bg} to="#0A0F1E" />
+        <ScrollView contentContainerStyle={styles.container}>
+          {error ? <Text style={styles.errorAlert}>{error}</Text> : null}
+
+          {screen === 'loading' && (
+            <View style={styles.centerContainer}>
+              <ActivityIndicator color={colors.brand} size="large" />
+              <Text style={styles.loadingText}>Initializing…</Text>
             </View>
           )}
 
-          <View style={styles.headerRight}>
-            <View style={styles.networkBadge}>
-              <View style={styles.greenPulse} />
-              <Text style={styles.networkBadgeText}>Sepolia</Text>
-            </View>
-            {account && screen === 'home' && (
-              <TouchableOpacity
-                style={styles.settingsIconButton}
-                onPress={() => setScreen('settings')}
-              >
-                <Text style={styles.settingsIconText}>⚙️</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-
-        {error ? <Text style={styles.errorAlert}>{error}</Text> : null}
-
-        {/* ---- Loading Screen ---- */}
-        {screen === 'loading' && (
-          <View style={styles.centerContainer}>
-            <ActivityIndicator color={colors.brand} size="large" />
-            <Text style={styles.loadingText}>Initializing secure enclave…</Text>
-          </View>
-        )}
-
-        {/* ---- Setup Screen (Tangem-Style Clean Flow) ---- */}
-        {screen === 'setup' && (
-          <AuthScreen
-            mode="setup"
-            password={password}
-            onPassword={setPassword}
-            onTapCard={() => openNfcScan('setup')}
-            busy={busy}
-          />
-        )}
-
-        {/* ---- Unlock Screen ---- */}
-        {screen === 'unlock' && (
-          <AuthScreen
-            mode="unlock"
-            password={password}
-            onPassword={setPassword}
-            onTapCard={() => openNfcScan('unlock')}
-            onReadonly={() => setScreen('home')}
-            busy={busy}
-          />
-        )}
-
-        {/* ---- Home Portfolio Dashboard (World-Class Wallet Feel) ---- */}
-                {screen === 'home' && account && (
+          {screen === 'home' && account && (
           <HomeScreen
+            handle={ensName || short(account.address)}
+            onSettings={() => setScreen('settings')}
             balance={balance}
             fiat={fiatBalance}
             locked={locked}
@@ -894,8 +849,11 @@ export default function App() {
             </TouchableOpacity>
           </View>
         )}
-      </ScrollView>
+        </ScrollView>
+      </View>
+      )}
     </View>
+    </SafeAreaProvider>
   );
 }
 
