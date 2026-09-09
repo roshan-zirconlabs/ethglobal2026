@@ -5,3 +5,11 @@ dist/
 *.log
 .DS_Store
 .vite/
+
+# --- secrets (never commit) ---
+secrets/
+*signing-key*.json
+*.secret.json
+.env
+.env.*
+!.env.example
