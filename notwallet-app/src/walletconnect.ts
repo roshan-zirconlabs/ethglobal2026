@@ -15,7 +15,7 @@ import type { WalletKitTypes } from '@reown/walletkit';
 
 // ---- Configuration ----
 // Get your project ID from https://cloud.reown.com
-const PROJECT_ID = 'YOUR_PROJECT_ID_HERE'; // TODO: Replace with actual Reown project ID
+const PROJECT_ID = process.env.EXPO_PUBLIC_WC_PROJECT_ID ?? '';
 
 const METADATA = {
   name: 'NotWallet',

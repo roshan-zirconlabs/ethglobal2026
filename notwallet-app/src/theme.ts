@@ -53,6 +53,29 @@ export const spacing = {
   huge: 48,
 };
 
+export const shadow = {
+  card: {
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+  sheet: {
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: -8 },
+    elevation: 16,
+  },
+};
+
+export const motion = {
+  fast: 140,
+  base: 200,
+  slow: 320,
+};
+
 export const radius = {
   sm: 8,
   md: 12,
