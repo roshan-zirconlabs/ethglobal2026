@@ -41,16 +41,15 @@ export type TrackedApproval = {
 // ---- Recovery Address Management ----
 
 /**
- * Set the recovery address during wallet creation.
- * This is a one-time operation — once set, it cannot be changed.
+ * Set (or update) the local recovery target.
+ *
+ * The authoritative guardian pointer lives on ENS as a text record the user's
+ * name owns; changing it requires a signed ENS write (card + password), so it's
+ * already tamper-resistant. This local copy simply mirrors that pointer so the
+ * offline sweep knows where to send funds — hence it's updatable, matching the
+ * mutable/revocable ENS guardian model (new_plan §6.1).
  */
 export async function setRecoveryAddress(address: string): Promise<void> {
-  const existing = await getRecoveryAddress();
-  if (existing) {
-    throw new Error(
-      'Recovery address is already set and cannot be changed. This is by design — it prevents an attacker from redirecting your funds.',
-    );
-  }
   await SecureStore.setItemAsync(RECOVERY_KEY, address);
 }
 

@@ -1,16 +1,18 @@
 /**
  * NotWallet UI kit — the shared, theme-driven component library.
  *
- * Every screen composes these; no ad-hoc styling. This is what makes the app feel
- * consistent and "high-grade". All tokens come from ../theme.
+ * Every screen composes these; no ad-hoc styling. Components here render on the
+ * LIGHT content surface (`colors.text`, `colors.surface`). Anything that sits on
+ * a gradient hero instead lives in `visual.tsx` and uses the `onHero*` colours.
  */
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Modal,
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   type TextInputProps,
@@ -33,9 +35,7 @@ export function Screen({
   padded?: boolean;
 }) {
   const inner = (
-    <View style={[padded && { paddingHorizontal: spacing.xl }, { flexGrow: 1 }]}>
-      {children}
-    </View>
+    <View style={[padded && { paddingHorizontal: spacing.xl }, { flexGrow: 1 }]}>{children}</View>
   );
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
@@ -68,10 +68,7 @@ export const Row = ({
   style?: ViewStyle;
 }) => (
   <View
-    style={[
-      { flexDirection: 'row', alignItems: align, justifyContent: justify, gap },
-      style,
-    ]}
+    style={[{ flexDirection: 'row', alignItems: align, justifyContent: justify, gap }, style]}
   >
     {children}
   </View>
@@ -84,11 +81,13 @@ export function Card({
   children,
   onPress,
   tone = 'surface',
+  padded = true,
   style,
 }: {
   children: ReactNode;
   onPress?: () => void;
-  tone?: 'surface' | 'alt' | 'danger' | 'warn' | 'ok';
+  tone?: 'surface' | 'alt' | 'danger' | 'warn' | 'ok' | 'brand';
+  padded?: boolean;
   style?: ViewStyle;
 }) {
   const bg = {
@@ -97,6 +96,7 @@ export function Card({
     danger: colors.dangerBg,
     warn: colors.warnBg,
     ok: colors.okBg,
+    brand: colors.brandBg,
   }[tone];
   const border = {
     surface: colors.border,
@@ -104,14 +104,22 @@ export function Card({
     danger: colors.dangerBorder,
     warn: colors.warnBorder,
     ok: colors.okBorder,
+    brand: colors.infoBorder,
   }[tone];
   const body = (
-    <View style={[styles.card, { backgroundColor: bg, borderColor: border }, style]}>
+    <View
+      style={[
+        styles.card,
+        { backgroundColor: bg, borderColor: border },
+        padded && { padding: spacing.lg },
+        style,
+      ]}
+    >
       {children}
     </View>
   );
   return onPress ? (
-    <TouchableOpacity activeOpacity={0.85} onPress={onPress}>
+    <TouchableOpacity activeOpacity={0.7} onPress={onPress}>
       {body}
     </TouchableOpacity>
   ) : (
@@ -135,9 +143,35 @@ export const Caption = ({ children, color }: { children: ReactNode; color?: stri
 export const Mono = ({ children }: { children: ReactNode }) => (
   <Text style={[typography.bodyMedium, typography.mono, { color: colors.text }]}>{children}</Text>
 );
+/** Small uppercase eyebrow — the label above a group of rows. */
+export const SectionLabel = ({ children }: { children: ReactNode }) => (
+  <Text style={typography.eyebrow}>{children}</Text>
+);
+
+/** Section title with an optional right-hand action ("View all"). */
+export function SectionHeader({
+  title,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <View style={styles.sectionHeader}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {actionLabel && onAction ? (
+        <TouchableOpacity onPress={onAction} hitSlop={8}>
+          <Text style={styles.sectionAction}>{actionLabel}</Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+}
 
 // ── Button ──────────────────────────────────────────────────────────────────
-type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'hero';
 export function Button({
   title,
   onPress,
@@ -145,6 +179,7 @@ export function Button({
   loading,
   disabled,
   icon,
+  style,
 }: {
   title: string;
   onPress?: () => void;
@@ -152,40 +187,72 @@ export function Button({
   loading?: boolean;
   disabled?: boolean;
   icon?: string;
+  style?: ViewStyle;
 }) {
   const isDisabled = disabled || loading;
+  const textColor =
+    variant === 'primary' || variant === 'danger'
+      ? colors.onBrand
+      : variant === 'hero'
+        ? colors.text
+        : variant === 'secondary'
+          ? colors.text
+          : colors.brand;
   return (
     <Pressable
       onPress={onPress}
       disabled={isDisabled}
       style={({ pressed }) => [
         styles.btn,
-        variant === 'primary' && { backgroundColor: colors.brand },
+        variant === 'primary' && [{ backgroundColor: colors.brand }, shadow.brand],
         variant === 'danger' && { backgroundColor: colors.danger },
+        variant === 'hero' && { backgroundColor: '#FFFFFF' },
         variant === 'secondary' && {
-          backgroundColor: 'transparent',
+          backgroundColor: colors.surface,
           borderWidth: 1,
-          borderColor: colors.brand,
+          borderColor: colors.border,
         },
         variant === 'ghost' && { backgroundColor: 'transparent' },
-        pressed && { opacity: 0.85, transform: [{ scale: 0.99 }] },
-        isDisabled && { opacity: 0.5 },
+        pressed && { opacity: 0.88, transform: [{ scale: 0.995 }] },
+        isDisabled && { opacity: 0.45 },
+        style,
       ]}
     >
       {loading ? (
-        <ActivityIndicator color={variant === 'secondary' || variant === 'ghost' ? colors.brandSoft : colors.onBrand} />
+        <ActivityIndicator color={textColor} />
       ) : (
-        <Text
-          style={[
-            styles.btnText,
-            (variant === 'secondary' || variant === 'ghost') && { color: colors.brandSoft },
-          ]}
-        >
+        <Text style={[styles.btnText, { color: textColor }]}>
           {icon ? `${icon}  ` : ''}
           {title}
         </Text>
       )}
     </Pressable>
+  );
+}
+
+/** Small circular icon button (settings gear, back chevron, overflow). */
+export function IconButton({
+  icon,
+  onPress,
+  onHero,
+}: {
+  icon: string;
+  onPress: () => void;
+  onHero?: boolean;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.7}
+      style={[
+        styles.iconBtn,
+        onHero
+          ? { backgroundColor: colors.onHeroFill, borderColor: colors.onHeroBorder }
+          : { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <Text style={{ fontSize: 16, color: onHero ? '#FFFFFF' : colors.text }}>{icon}</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -209,6 +276,146 @@ export function TextField({
   );
 }
 
+/**
+ * Numeric field with a live text draft (so "0." while typing doesn't snap to 0).
+ * Reports the parsed number on every edit; empty/invalid reports 0.
+ */
+export function NumberField({
+  label,
+  value,
+  onChangeNumber,
+  suffix,
+  placeholder,
+}: {
+  label?: string;
+  value: number;
+  onChangeNumber: (n: number) => void;
+  suffix?: string;
+  placeholder?: string;
+}) {
+  const [draft, setDraft] = useState(value ? String(value) : '');
+  return (
+    <View style={{ marginBottom: spacing.md }}>
+      {label ? <Caption>{label}</Caption> : null}
+      <View style={styles.numberWrap}>
+        <TextInput
+          value={draft}
+          keyboardType="decimal-pad"
+          placeholder={placeholder ?? '0'}
+          placeholderTextColor={colors.textDim}
+          style={styles.numberInput}
+          onChangeText={(t) => {
+            const cleaned = t.replace(/[^0-9.]/g, '');
+            setDraft(cleaned);
+            const n = parseFloat(cleaned);
+            onChangeNumber(Number.isFinite(n) ? n : 0);
+          }}
+        />
+        {suffix ? <Text style={styles.numberSuffix}>{suffix}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
+/** Labeled on/off row with a native switch. */
+export function Toggle({
+  label,
+  hint,
+  value,
+  onValueChange,
+}: {
+  label: string;
+  hint?: string;
+  value: boolean;
+  onValueChange: (v: boolean) => void;
+}) {
+  return (
+    <View style={styles.toggleRow}>
+      <View style={{ flex: 1, paddingRight: spacing.md }}>
+        <Text style={styles.rowTitle}>{label}</Text>
+        {hint ? <Text style={[typography.caption, { marginTop: 2 }]}>{hint}</Text> : null}
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={{ false: '#D3DAE6', true: colors.brand }}
+        thumbColor="#FFFFFF"
+      />
+    </View>
+  );
+}
+
+// ── List row (the reference design's core content unit) ─────────────────────
+export function ListRow({
+  icon,
+  iconTone = 'neutral',
+  title,
+  subtitle,
+  value,
+  valueSub,
+  valueTone,
+  onPress,
+  chevron,
+}: {
+  icon?: string;
+  iconTone?: 'neutral' | 'brand' | 'ok' | 'warn' | 'danger';
+  title: string;
+  subtitle?: string;
+  value?: string;
+  valueSub?: string;
+  valueTone?: 'default' | 'ok' | 'danger';
+  onPress?: () => void;
+  chevron?: boolean;
+}) {
+  const wellBg = {
+    neutral: colors.surfaceAlt,
+    brand: colors.brandBg,
+    ok: colors.okBg,
+    warn: colors.warnBg,
+    danger: colors.dangerBg,
+  }[iconTone];
+  const valueColor =
+    valueTone === 'ok' ? colors.ok : valueTone === 'danger' ? colors.danger : colors.text;
+
+  const content = (
+    <View style={styles.listRow}>
+      {icon ? (
+        <View style={[styles.iconWell, { backgroundColor: wellBg }]}>
+          <Text style={{ fontSize: 17 }}>{icon}</Text>
+        </View>
+      ) : null}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.rowTitle} numberOfLines={1}>
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text style={styles.rowSub} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
+      {value || valueSub ? (
+        <View style={{ alignItems: 'flex-end', marginLeft: spacing.sm }}>
+          {value ? <Text style={[styles.rowValue, { color: valueColor }]}>{value}</Text> : null}
+          {valueSub ? <Text style={styles.rowSub}>{valueSub}</Text> : null}
+        </View>
+      ) : null}
+      {chevron ? <Text style={styles.chevron}>›</Text> : null}
+    </View>
+  );
+
+  return onPress ? (
+    <TouchableOpacity activeOpacity={0.6} onPress={onPress}>
+      {content}
+    </TouchableOpacity>
+  ) : (
+    content
+  );
+}
+
+/** Thin separator for use between ListRows inside a Card. */
+export const RowDivider = () => <View style={styles.rowDivider} />;
+
 // ── Badges / chips ────────────────────────────────────────────────────────────
 export type Risk = 'info' | 'warn' | 'danger' | 'ok';
 const RISK: Record<Risk, { fg: string; bg: string; bd: string }> = {
@@ -221,7 +428,7 @@ export function RiskBadge({ level, label }: { level: Risk; label: string }) {
   const c = RISK[level];
   return (
     <View style={[styles.badge, { backgroundColor: c.bg, borderColor: c.bd }]}>
-      <Text style={{ color: c.fg, fontSize: 12, fontWeight: '700', letterSpacing: 0.5 }}>
+      <Text style={{ color: c.fg, fontSize: 11, fontWeight: '800', letterSpacing: 0.8 }}>
         {label}
       </Text>
     </View>
@@ -278,20 +485,40 @@ export function Sheet({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.md },
+
   card: {
-    borderRadius: radius.lg,
+    borderRadius: radius.xl,
     borderWidth: 1,
-    padding: spacing.lg,
     ...shadow.card,
   },
+
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  sectionTitle: { fontSize: 18, fontWeight: '800', color: colors.text, letterSpacing: -0.3 },
+  sectionAction: { fontSize: 14, fontWeight: '600', color: colors.brand },
+
   btn: {
-    minHeight: 52,
-    borderRadius: radius.md,
+    minHeight: 54,
+    borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.xl,
   },
-  btnText: { color: colors.onBrand, fontSize: 16, fontWeight: '700' },
+  btnText: { fontSize: 16, fontWeight: '700' },
+
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
   input: {
     backgroundColor: colors.surfaceAlt,
     borderColor: colors.border,
@@ -300,14 +527,53 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 16,
     paddingHorizontal: spacing.lg,
-    paddingVertical: 14,
+    paddingVertical: 15,
     marginTop: spacing.xs,
   },
+  numberWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.lg,
+  },
+  numberInput: { flex: 1, color: colors.text, fontSize: 16, paddingVertical: 15 },
+  numberSuffix: { color: colors.textDim, fontSize: 14, fontWeight: '700' },
+
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.md,
+  },
+
+  listRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  iconWell: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowTitle: { fontSize: 15, fontWeight: '700', color: colors.text },
+  rowSub: { fontSize: 12.5, color: colors.textMuted, marginTop: 2 },
+  rowValue: { fontSize: 15, fontWeight: '700' },
+  rowDivider: { height: 1, backgroundColor: colors.border, marginLeft: 54 },
+  chevron: { fontSize: 22, color: colors.textDim, marginLeft: spacing.xs },
+
   badge: {
     borderRadius: radius.pill,
     borderWidth: 1,
     paddingHorizontal: spacing.md,
-    paddingVertical: 4,
+    paddingVertical: 5,
     alignSelf: 'flex-start',
   },
   chip: {
@@ -319,11 +585,12 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     alignSelf: 'flex-start',
   },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' },
+
+  backdrop: { flex: 1, backgroundColor: 'rgba(11,18,32,0.45)' },
   sheet: {
     backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
     padding: spacing.xl,
     paddingBottom: spacing.huge,
     ...shadow.sheet,
@@ -332,7 +599,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: colors.border,
+    backgroundColor: colors.borderFocus,
     alignSelf: 'center',
     marginBottom: spacing.lg,
   },

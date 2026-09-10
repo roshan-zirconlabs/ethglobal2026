@@ -7,6 +7,7 @@ import {
   View,
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
+import { copyToClipboard } from '../clipboard';
 import { colors, radius, spacing } from '../theme';
 
 interface ReceiveModalProps {
@@ -25,6 +26,8 @@ export function ReceiveModal({
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
+    // Only show the confirmation if the write actually succeeded.
+    if (!copyToClipboard(address)) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -57,9 +60,9 @@ export function ReceiveModal({
             </View>
           ) : null}
 
-          <View style={styles.addressBox}>
+          <TouchableOpacity style={styles.addressBox} onPress={handleCopy} activeOpacity={0.7}>
             <Text style={styles.addressText}>{address}</Text>
-          </View>
+          </TouchableOpacity>
 
           <TouchableOpacity style={styles.copyButton} onPress={handleCopy}>
             <Text style={styles.copyButtonText}>

@@ -1,29 +1,93 @@
 /**
- * Cinematic visual components (SVG-based gradients — no extra native module).
- * Inspired by modern fintech UI: gradient backdrops, a big gradient account card,
- * a logo mark, and rounded-square action tiles.
+ * Radiant visuals — the brand moments of the app.
+ *
+ * These are the only places a gradient appears: the onboarding backdrop, the
+ * Home balance hero, and the identity card. Everything drawn inside them must
+ * use the `onHero*` colour world (white / translucent white), never the light
+ * `text` colours.
+ *
+ * Gradients are SVG (react-native-svg) so we get true multi-stop radiance with
+ * no extra native module.
  */
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useRef } from 'react';
+import { StyleSheet, Text, TouchableOpacity, View, type ViewStyle } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, Line, LinearGradient, Rect, Stop } from 'react-native-svg';
 
-import { colors, radius, spacing, typography } from '../theme';
+import { colors, gradients, radius, shadow, spacing } from '../theme';
 
-/** Full-bleed gradient backdrop; place first inside a flex:1 container. */
-export function GradientBackdrop({ from, to }: { from: string; to: string }) {
+/**
+ * SVG `<Defs>` ids are document-global, so two gradients sharing an id silently
+ * paint the same fill. Hand every instance its own id.
+ */
+let gradientSeq = 0;
+function useGradientId(prefix: string): string {
+  const ref = useRef<string | null>(null);
+  if (ref.current === null) {
+    gradientSeq += 1;
+    ref.current = `${prefix}${gradientSeq}`;
+  }
+  return ref.current;
+}
+
+/** Multi-stop gradient fill that covers its parent. */
+export function GradientFill({
+  stops,
+  diagonal = false,
+}: {
+  stops: readonly string[];
+  diagonal?: boolean;
+}) {
+  const id = useGradientId('grad');
   return (
     <Svg style={StyleSheet.absoluteFill}>
       <Defs>
-        <LinearGradient id="bg" x1="0" y1="0" x2="0.4" y2="1">
-          <Stop offset="0" stopColor={from} />
-          <Stop offset="1" stopColor={to} />
+        {/* x2 = 0.4 matches the angle the onboarding backdrop already used. */}
+        <LinearGradient id={id} x1="0" y1="0" x2={diagonal ? '1' : '0.4'} y2="1">
+          {stops.map((color, i) => (
+            <Stop key={i} offset={`${i / Math.max(1, stops.length - 1)}`} stopColor={color} />
+          ))}
         </LinearGradient>
       </Defs>
-      <Rect x="0" y="0" width="100%" height="100%" fill="url(#bg)" />
+      <Rect x="0" y="0" width="100%" height="100%" fill={`url(#${id})`} />
     </Svg>
   );
 }
 
-/** The NotWallet mark — a bold 6-point asterisk (echoes the reference's glyph). */
+/** Full-bleed gradient backdrop; place first inside a `flex: 1` container. */
+export function GradientBackdrop({ stops }: { stops: readonly string[] }) {
+  return <GradientFill stops={stops} />;
+}
+
+/**
+ * The gradient panel at the top of a content screen: bleeds under the status
+ * bar, curves into the light sheet below it.
+ */
+export function HeroPanel({
+  stops,
+  children,
+  style,
+}: {
+  stops: readonly string[];
+  children: React.ReactNode;
+  style?: ViewStyle;
+}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View
+      style={[
+        styles.hero,
+        { paddingTop: insets.top + spacing.md },
+        style,
+      ]}
+    >
+      <GradientFill stops={stops} />
+      <View style={{ paddingHorizontal: spacing.xl, paddingBottom: spacing.xl }}>{children}</View>
+    </View>
+  );
+}
+
+/** The NotWallet mark — a bold 6-point asterisk. */
 export function LogoMark({ size = 72, color = '#FFFFFF' }: { size?: number; color?: string }) {
   const c = size / 2;
   const r = size * 0.42;
@@ -55,90 +119,117 @@ export function LogoMark({ size = 72, color = '#FFFFFF' }: { size?: number; colo
   );
 }
 
-/** A gradient "account card" — the hero of the Home screen. */
-export function AccountCard({
+/**
+ * A gradient card face — used for the wallet identity (ENS name + address),
+ * mirroring the debit-card treatment in the reference design.
+ */
+export function IdentityCard({
   label,
-  handle,
-  balance,
-  fiat,
-  height = 200,
+  name,
+  sub,
+  height = 190,
 }: {
   label: string;
-  handle: string;
-  balance: string;
-  fiat?: string;
+  name: string;
+  sub?: string;
   height?: number;
 }) {
   return (
     <View style={[styles.card, { height }]}>
-      <Svg style={StyleSheet.absoluteFill}>
-        <Defs>
-          <LinearGradient id="card" x1="0" y1="0" x2="1" y2="1">
-            <Stop offset="0" stopColor="#3B82F6" />
-            <Stop offset="0.55" stopColor="#1E3A8A" />
-            <Stop offset="1" stopColor="#0A0F1E" />
-          </LinearGradient>
-        </Defs>
-        <Rect x="0" y="0" width="100%" height="100%" fill="url(#card)" rx={radius.xl} />
-      </Svg>
+      <GradientFill stops={gradients.card} diagonal />
       <View style={styles.cardInner}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <View>
-            <Text style={styles.cardLabel}>{label}</Text>
-            <Text style={styles.cardHandle}>{handle}</Text>
-          </View>
-          <LogoMark size={30} color="rgba(255,255,255,0.9)" />
+        <View style={styles.cardTop}>
+          <Text style={styles.cardLabel}>{label}</Text>
+          <LogoMark size={30} color="rgba(255,255,255,0.92)" />
+        </View>
+        <View style={styles.cardCenter}>
+          <LogoMark size={64} color="rgba(255,255,255,0.95)" />
         </View>
         <View>
-          <Text style={styles.cardBalance}>{balance} ETH</Text>
-          {fiat ? <Text style={styles.cardFiat}>{fiat}</Text> : null}
+          <Text style={styles.cardName} numberOfLines={1}>
+            {name}
+          </Text>
+          {sub ? (
+            <Text style={styles.cardSub} numberOfLines={1}>
+              {sub}
+            </Text>
+          ) : null}
         </View>
       </View>
     </View>
   );
 }
-
-/** Rounded-square action tile (Send / Receive / Connect / Shield). */
+/**
+ * Quick-action tile. Lives on the gradient hero: translucent white fill, glyph
+ * top-left, tiny uppercase label bottom-left — matching the reference.
+ */
 export function ActionTile({
   icon,
   label,
   onPress,
-  accent,
+  emphasis,
 }: {
   icon: string;
   label: string;
   onPress: () => void;
-  accent?: boolean;
+  emphasis?: boolean;
 }) {
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.8} style={{ alignItems: 'center', flex: 1, gap: 8 }}>
-      <View style={[styles.tile, accent && { backgroundColor: colors.brand, borderColor: colors.brand }]}>
-        <Text style={{ fontSize: 22 }}>{icon}</Text>
-      </View>
-      <Text style={[typography.caption, { color: colors.textMuted }]}>{label}</Text>
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.75}
+      style={[styles.tile, emphasis && styles.tileEmphasis]}
+    >
+      <Text style={styles.tileIcon}>{icon}</Text>
+      <Text style={styles.tileLabel} numberOfLines={1}>
+        {label.toUpperCase()}
+      </Text>
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
+  hero: {
+    overflow: 'hidden',
+    borderBottomLeftRadius: radius.xxl,
+    borderBottomRightRadius: radius.xxl,
+  },
+
   card: {
     borderRadius: radius.xl,
     overflow: 'hidden',
-    justifyContent: 'space-between',
+    ...shadow.raised,
   },
   cardInner: { flex: 1, padding: spacing.xl, justifyContent: 'space-between' },
-  cardLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '700', letterSpacing: 1 },
-  cardHandle: { color: '#FFFFFF', fontSize: 16, fontWeight: '600', marginTop: 2 },
-  cardBalance: { color: '#FFFFFF', fontSize: 34, fontWeight: '800', letterSpacing: -0.5 },
-  cardFiat: { color: 'rgba(255,255,255,0.75)', fontSize: 15, marginTop: 2 },
+  cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  cardCenter: { alignItems: 'center' },
+  cardLabel: {
+    color: colors.onHeroMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.1,
+  },
+  cardName: { color: '#FFFFFF', fontSize: 20, fontWeight: '800', letterSpacing: -0.3 },
+  cardSub: { color: colors.onHeroMuted, fontSize: 13, marginTop: 3 },
+
   tile: {
-    width: 58,
-    height: 58,
+    flex: 1,
+    aspectRatio: 1,
     borderRadius: radius.lg,
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor: colors.onHeroFill,
     borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: colors.onHeroBorder,
+    padding: spacing.md,
+    justifyContent: 'space-between',
+  },
+  tileEmphasis: {
+    backgroundColor: colors.onHeroFillStrong,
+  },
+  tileIcon: { fontSize: 19, color: '#FFFFFF' },
+  tileLabel: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
   },
 });

@@ -45,6 +45,9 @@ export type TypedDataDomain = {
 
 type RpcLike = { method: string; params?: unknown };
 
+/** Sepolia — the chain this wallet signs on when a tx omits `chainId`. */
+const DEFAULT_CHAIN_ID = 11155111;
+
 function getRpc(request: KeyringRequest): RpcLike {
   return request.request as unknown as RpcLike;
 }
@@ -84,7 +87,12 @@ export function previewRequest(request: KeyringRequest): RequestPreview {
   const args = (params ?? []) as any[];
 
   switch (method) {
-    case 'eth_signTransaction': {
+    // Both must decode to a `tx` preview. `eth_sendTransaction` is what
+    // WalletConnect dapps (and our own send/revoke/ENS flows) actually use, and
+    // missing it here silently disables clear-signing, the spending-policy
+    // check, and ENS counterparty resolution — all of which key off `kind`.
+    case 'eth_signTransaction':
+    case 'eth_sendTransaction': {
       const tx = args[0] ?? {};
       return {
         kind: 'tx',
@@ -94,7 +102,8 @@ export function previewRequest(request: KeyringRequest): RequestPreview {
           to: tx.to ?? null,
           valueWei: tx.value ? BigInt(tx.value) : 0n,
           data: tx.data ?? '0x',
-          chainId: tx.chainId ? Number(BigInt(tx.chainId)) : 1,
+          // Default to the chain this wallet operates on, not mainnet.
+          chainId: tx.chainId ? Number(BigInt(tx.chainId)) : DEFAULT_CHAIN_ID,
         },
       };
     }
@@ -148,6 +157,11 @@ export async function signRequestWithCard(
     case 'eth_signTypedData_v4': {
       return signTypedData(args, card);
     }
+    case 'eth_sendTransaction':
+      // Must be broadcast (it returns a tx hash), not signed in isolation.
+      throw new Error(
+        'eth_sendTransaction must go through signAndBroadcast, not signRequestWithCard.',
+      );
     default:
       throw new Error(
         `'${method}' is not supported yet by the card signer (transactions, messages, and typed data are).`,
@@ -294,16 +308,28 @@ export async function signAndBroadcast(
   if (!txLike.nonce) {
     txLike.nonce = await provider.getTransactionCount(txParams.from);
   }
+  const isContractCall = Boolean(txParams?.data && txParams.data !== '0x');
   if (!txLike.gasLimit) {
     try {
-      txLike.gasLimit = await provider.estimateGas({
+      const estimate = await provider.estimateGas({
         from: txParams.from,
         to: txParams.to,
         value: txParams.value,
         data: txParams.data,
       });
-    } catch {
-      txLike.gasLimit = 21000; // fallback for simple transfers
+      // Head-room: estimation is done against current state, which can move.
+      txLike.gasLimit = isContractCall ? (estimate * 12n) / 10n : estimate;
+    } catch (err) {
+      // A failed estimate on a contract call means the call reverts. Falling
+      // back to 21000 would broadcast a doomed tx and burn the user's gas, so
+      // refuse and surface why. Only a plain ETH transfer gets the fallback.
+      if (isContractCall) {
+        const reason = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          `This transaction would fail on-chain, so it was not broadcast. The contract rejected it during gas estimation: ${reason}`,
+        );
+      }
+      txLike.gasLimit = 21000n;
     }
   }
 

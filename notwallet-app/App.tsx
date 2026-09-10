@@ -1,26 +1,27 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { JsonRpcProvider, formatEther, parseEther } from 'ethers';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   AuthScreen,
   ConnectScreen,
   HomeScreen,
   ReviewScreen,
+  SettingsScreen,
+  IdentityScreen,
+  ApprovalsScreen,
+  PolicyBlockScreen,
+  RecoveryScreen,
 } from './src/screens';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { GradientBackdrop } from './src/ui/visual';
 import {
   ActivityIndicator,
   Alert,
-  Clipboard,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
-  TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 
@@ -29,28 +30,45 @@ import {
   clearSignTypedData,
   type ClearSignResult,
   type ResolvedNames,
-  type RiskLevel,
 } from './src/clearsign';
-import { resolveAddress, resolveAddresses, type ResolvedIdentity } from './src/ens';
+import {
+  resolveAddress,
+  resolveAddresses,
+  resolveName,
+  readNodeOwner,
+  labelHash,
+  subnameNode,
+  buildSubnodeRecordTx,
+  buildSetTextRecordTx,
+  ENS_PARENT_NAME,
+  ENS_PARENT_NODE,
+  RECOVERY_RECORD_KEY,
+  type ResolvedIdentity,
+} from './src/ens';
+import { namehash, getAddress, isAddress } from 'ethers';
 import { MfkdfSigner } from './src/mfkdf';
 import { startMonitoring, stopMonitoring, recordLocalTransaction, sendSpendingNotification } from './src/monitor';
-import { checkPolicy, getSpendingSummary, DEFAULT_POLICY } from './src/policies';
+import { checkPolicy, getSpendingSummary } from './src/policies';
+import {
+  loadSettings,
+  saveSettings,
+  settingsToPolicy,
+  DEFAULT_SETTINGS,
+  type WalletSettings,
+} from './src/settings';
+import {
+  loadIdentity,
+  saveIdentity,
+  EMPTY_IDENTITY,
+  type WalletIdentity,
+} from './src/identity';
 import {
   setRecoveryAddress,
-  getRecoveryAddress,
   trackApproval,
   executeEmergencyRecovery,
   type RecoveryResult,
 } from './src/recovery';
 import { scanApprovals, buildRevokeData, type TokenApproval } from './src/approvals';
-import {
-  STANDARD_SUBACCOUNTS,
-  deriveStandardSubaccounts,
-  setActiveSubaccountId,
-  getActiveSubaccountId,
-  type SubAccount,
-  type SubAccountPurpose,
-} from './src/subaccounts';
 import { previewRequest, signRequestWithCard, signAndBroadcast } from './src/signing';
 import { getTodaySpent, recordSpend } from './src/spend-tracker';
 import {
@@ -87,12 +105,6 @@ import { verifyHuman } from './src/worldid';
 const SEPOLIA_RPC = 'https://ethereum-sepolia-rpc.publicnode.com';
 const ETH_USD_PRICE = 2400; // Reference price for portfolio display
 
-const RISK_COLOR: Record<RiskLevel, string> = {
-  info: colors.info,
-  warn: colors.warn,
-  danger: colors.danger,
-};
-
 type Screen =
   | 'loading'
   | 'setup'
@@ -102,8 +114,14 @@ type Screen =
   | 'review'
   | 'policy_block'
   | 'settings'
+  | 'identity'
   | 'approvals'
   | 'recovery_vault';
+
+/** A signed ENS write we want to persist to local identity once it lands. */
+type PendingIdentityAction =
+  | { type: 'claim'; ensName: string }
+  | { type: 'guardian'; guardianAddress: string; guardianEns: string | null };
 
 type Account = { address: string; publicKey: string };
 
@@ -143,7 +161,15 @@ export default function App() {
   const [request, setRequest] = useState<KeyringRequest | null>(null);
   const [wcEvent, setWcEvent] = useState<WalletKitTypes.SessionRequest | null>(null);
   const [resolvedNames, setResolvedNames] = useState<ResolvedNames | undefined>(undefined);
+  const [counterparty, setCounterparty] = useState<ResolvedIdentity | null>(null);
   const [policyResult, setPolicyResult] = useState<{ reason: string; canOverride: boolean } | null>(null);
+  const [settings, setSettings] = useState<WalletSettings>(DEFAULT_SETTINGS);
+  const [identity, setIdentity] = useState<WalletIdentity>(EMPTY_IDENTITY);
+  const [pendingIdentityAction, setPendingIdentityAction] = useState<PendingIdentityAction | null>(null);
+  const [identityBusy, setIdentityBusy] = useState(false);
+  const [identityStatus, setIdentityStatus] = useState<string | null>(null);
+  const identityRef = useRef(identity);
+  useEffect(() => { identityRef.current = identity; }, [identity]);
   const [sessions, setSessions] = useState<Record<string, any>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -153,19 +179,14 @@ export default function App() {
   const [nfcVisible, setNfcVisible] = useState(false);
   const [nfcPurpose, setNfcPurpose] = useState<'setup' | 'unlock' | 'sign' | 'sweep'>('setup');
 
-  // Interactive Modals & Tabs
+  // Interactive Modals
   const [receiveVisible, setReceiveVisible] = useState(false);
   const [sendVisible, setSendVisible] = useState(false);
-  const [activeTab, setActiveTab] = useState<'assets' | 'activity'>('assets');
-  const [copiedAddr, setCopiedAddr] = useState(false);
   const [logModalVisible, setLogModalVisible] = useState(false);
 
-  // Subaccounts & Approvals state
-  const [subaccounts, setSubaccounts] = useState<SubAccount[]>([]);
-  const [activeSubaccount, setActiveSubaccount] = useState<SubAccountPurpose>('main');
+  // Approvals & recovery state
   const [approvalsList, setApprovalsList] = useState<TokenApproval[]>([]);
   const [scanningApprovals, setScanningApprovals] = useState(false);
-  const [recoveryRunning, setRecoveryRunning] = useState(false);
   const [recoveryStatusResult, setRecoveryStatusResult] = useState<RecoveryResult | null>(null);
 
   const fail = (err: unknown) =>
@@ -175,8 +196,14 @@ export default function App() {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const saved = await loadWallet();
+      const [saved, savedSettings, savedIdentity] = await Promise.all([
+        loadWallet(),
+        loadSettings(),
+        loadIdentity(),
+      ]);
       if (!alive) return;
+      setSettings(savedSettings);
+      setIdentity(savedIdentity);
 
       if (saved && saved.cards.length > 0) {
         const active = saved.cards[saved.activeIndex] ?? saved.cards[0];
@@ -186,9 +213,6 @@ export default function App() {
         setScreen('home');
         void fetchBalance(active.address);
         void lookupEnsIdentity(active.address);
-
-        const savedSubId = await getActiveSubaccountId();
-        setActiveSubaccount(savedSubId as SubAccountPurpose);
 
         // Initialize WalletConnect
         try {
@@ -239,22 +263,26 @@ export default function App() {
       setRequest(kr);
       setWcEvent(event);
 
-      // Resolve ENS names for counterparty addresses
+      // Resolve ENS names for counterparty addresses (anti-impersonation)
       const preview = previewRequest(kr);
+      setCounterparty(null);
       if (preview.kind === 'tx' && preview.tx.to) {
         try {
           const names = await resolveAddresses([preview.tx.to]);
           setResolvedNames(names);
+          const id = await resolveAddress(preview.tx.to);
+          setCounterparty(id);
         } catch { /* no ENS */ }
       }
 
-      // Check spending policy
+      // Check spending policy against the user's live, persisted settings
       if (preview.kind === 'tx') {
         const todaySpent = await getTodaySpent(account.address);
         const provider = new JsonRpcProvider(SEPOLIA_RPC);
         let bal = 0n;
         try { bal = await provider.getBalance(account.address); } catch { /* ok */ }
-        const check = checkPolicy(preview.tx, DEFAULT_POLICY, todaySpent, bal);
+        const policy = settingsToPolicy(await loadSettings());
+        const check = checkPolicy(preview.tx, policy, todaySpent, bal);
         if (!check.allowed) {
           setPolicyResult({ reason: check.reason ?? 'Policy blocked', canOverride: check.canOverride ?? false });
           setScreen('policy_block');
@@ -326,9 +354,6 @@ export default function App() {
           publicKey: identity.publicKey,
         });
 
-        const envelopes = await deriveStandardSubaccounts(cardId, password);
-        setSubaccounts(envelopes);
-
         setAccount({ address: identity.address, publicKey: identity.publicKey });
         setLocked(false);
         setScreen('home');
@@ -357,9 +382,6 @@ export default function App() {
           await setActiveCard(cardIdx);
         }
 
-        const envelopes = await deriveStandardSubaccounts(cardId, password);
-        setSubaccounts(envelopes);
-
         setLocked(false);
         setScreen('home');
         if (account) void fetchBalance(account.address);
@@ -375,7 +397,7 @@ export default function App() {
           if (!res.success) throw new Error('Biometric check cancelled.');
         }
 
-        const signer = new MfkdfSigner(cardId, password, activeSubaccount);
+        const signer = new MfkdfSigner(cardId, password);
         const preview = previewRequest(request);
 
         if (preview.kind === 'tx' && request.request.method === 'eth_sendTransaction') {
@@ -387,7 +409,7 @@ export default function App() {
             recordLocalTransaction();
 
             const todaySpent = await getTodaySpent(account.address);
-            const awareness = getSpendingSummary(todaySpent, DEFAULT_POLICY);
+            const awareness = getSpendingSummary(todaySpent, settingsToPolicy(settings));
             if (awareness.percentUsed >= 80) {
               await sendSpendingNotification(awareness.percentUsed, awareness.message);
             }
@@ -404,6 +426,12 @@ export default function App() {
           if (wcEvent) {
             await respondSuccess(wcEvent.topic, wcEvent.id, hash);
           }
+
+          // If this signed tx was an ENS identity write, persist it locally now.
+          if (pendingIdentityAction) {
+            await applyPendingIdentityAction(pendingIdentityAction);
+            setPendingIdentityAction(null);
+          }
         } else {
           const signature = await signRequestWithCard(request, signer);
           if (wcEvent) {
@@ -414,7 +442,9 @@ export default function App() {
         setRequest(null);
         setWcEvent(null);
         setResolvedNames(undefined);
-        setScreen('home');
+        setCounterparty(null);
+        // Return to identity screen after an ENS write, else home.
+        setScreen(pendingIdentityAction ? 'identity' : 'home');
         void fetchBalance(account.address);
       } else if (nfcPurpose === 'sweep') {
         const signer = new MfkdfSigner(cardId, password);
@@ -427,20 +457,120 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-  }, [nfcPurpose, password, request, account, activeSubaccount, wcEvent, fetchBalance]);
+  }, [nfcPurpose, password, request, account, settings, pendingIdentityAction, wcEvent, fetchBalance]);
 
-  // ---- Subaccount Switching ----
-  const onSwitchSubaccount = useCallback(async (purpose: SubAccountPurpose) => {
-    setActiveSubaccount(purpose);
-    await setActiveSubaccountId(purpose);
-    const chosen = subaccounts.find((s) => s.purpose === purpose);
-    if (chosen) {
-      setAccount({ address: chosen.address, publicKey: chosen.publicKey });
-      void fetchBalance(chosen.address);
-      void lookupEnsIdentity(chosen.address);
-      startMonitoring(chosen.address);
+  // ---- Settings persistence ----
+  const updateSettings = useCallback(async (next: WalletSettings) => {
+    setSettings(next);
+    await saveSettings(next);
+  }, []);
+
+  // ---- ENS identity: apply a signed write to local state ----
+  // Reads the latest identity via a ref so it's safe to call from the (rarely
+  // re-created) NFC sign handler without capturing a stale snapshot.
+  const applyPendingIdentityAction = useCallback(async (action: PendingIdentityAction) => {
+    const current = identityRef.current;
+    if (action.type === 'claim') {
+      const next = { ...current, ensName: action.ensName };
+      setIdentity(next);
+      await saveIdentity(next);
+      setEnsName(action.ensName);
+      setIdentityStatus(`Claimed ${action.ensName} ✓`);
+    } else {
+      const next = { ...current, guardianAddress: action.guardianAddress, guardianEns: action.guardianEns };
+      setIdentity(next);
+      await saveIdentity(next);
+      // Keep the recovery layer's target in sync with the ENS guardian pointer.
+      await setRecoveryAddress(action.guardianAddress);
+      setIdentityStatus('Guardian saved to your ENS record ✓');
     }
-  }, [subaccounts, fetchBalance]);
+  }, []);
+
+  // ---- ENS: check availability, then route a real claim tx through Review ----
+  const onCheckAndClaim = useCallback(async (label: string) => {
+    if (!account) return;
+    setIdentityStatus(null);
+    if (!label || label.length < 3) {
+      setIdentityStatus('Pick a name with at least 3 characters.');
+      return;
+    }
+    setIdentityBusy(true);
+    try {
+      const node = subnameNode(label);
+      const owner = await readNodeOwner(node);
+      if (owner) {
+        setIdentityStatus(`${label}.${ENS_PARENT_NAME} is already taken.`);
+        return;
+      }
+      const fullName = `${label}.${ENS_PARENT_NAME}`;
+      const tx = buildSubnodeRecordTx(ENS_PARENT_NODE, labelHash(label), account.address);
+      const req: KeyringRequest = {
+        id: `ens-claim-${Date.now()}`,
+        account: account.address,
+        request: {
+          method: 'eth_sendTransaction',
+          params: [{ from: account.address, to: tx.to, data: tx.data, value: '0x0' }],
+        },
+      };
+      setPendingIdentityAction({ type: 'claim', ensName: fullName });
+      setRequest(req);
+      setCounterparty(null);
+      setIdentityStatus(`${fullName} is available — sign to claim it.`);
+      setScreen('review');
+    } catch (err) {
+      fail(err);
+    } finally {
+      setIdentityBusy(false);
+    }
+  }, [account]);
+
+  // ---- ENS: set the recovery guardian as a text record the name owns ----
+  const onSetGuardian = useCallback(async (input: string) => {
+    if (!account) return;
+    setIdentityStatus(null);
+    if (!identity.ensName) {
+      setIdentityStatus('Claim your ENS name first.');
+      return;
+    }
+    setIdentityBusy(true);
+    try {
+      let guardianAddress: string | null = null;
+      let guardianEns: string | null = null;
+      if (input.toLowerCase().endsWith('.eth')) {
+        guardianAddress = await resolveName(input);
+        guardianEns = input.toLowerCase();
+        if (!guardianAddress) {
+          setIdentityStatus(`${input} does not resolve to an address.`);
+          return;
+        }
+      } else if (isAddress(input)) {
+        guardianAddress = getAddress(input);
+      } else {
+        setIdentityStatus('Enter a valid ENS name or 0x address.');
+        return;
+      }
+
+      const node = namehash(identity.ensName);
+      const tx = buildSetTextRecordTx(node, RECOVERY_RECORD_KEY, guardianAddress);
+      const req: KeyringRequest = {
+        id: `ens-guardian-${Date.now()}`,
+        account: account.address,
+        request: {
+          method: 'eth_sendTransaction',
+          params: [{ from: account.address, to: tx.to, data: tx.data, value: '0x0' }],
+        },
+      };
+      setPendingIdentityAction({ type: 'guardian', guardianAddress, guardianEns });
+      setRequest(req);
+      setCounterparty(null);
+      setIdentityStatus('Sign to write your guardian to ENS.');
+      setScreen('review');
+    } catch (err) {
+      fail(err);
+    } finally {
+      setIdentityBusy(false);
+    }
+  }, [account, identity.ensName]);
 
   // ---- Approvals Scanner ----
   const onScanApprovals = useCallback(async () => {
@@ -461,7 +591,7 @@ export default function App() {
     async (tokenAddr: string, spenderAddr: string) => {
       if (!account) return;
       const revokeTx = buildRevokeData(tokenAddr, spenderAddr);
-      const fakeReq: KeyringRequest = {
+      const revokeReq: KeyringRequest = {
         id: `revoke-${Date.now()}`,
         account: account.address,
         request: {
@@ -476,7 +606,8 @@ export default function App() {
           ],
         },
       };
-      setRequest(fakeReq);
+      setRequest(revokeReq);
+      setCounterparty(null);
       setScreen('review');
     },
     [account],
@@ -528,12 +659,8 @@ export default function App() {
     setScreen('home');
   }, [wcEvent]);
 
-  const copyAddressToClipboard = () => {
-    if (!account) return;
-    Clipboard.setString(account.address);
-    setCopiedAddr(true);
-    setTimeout(() => setCopiedAddr(false), 2000);
-  };
+  // Screens that paint a full-bleed gradient behind the status bar.
+  const onGradient = screen === 'setup' || screen === 'unlock' || screen === 'home';
 
   const summary = request ? summarize(request, resolvedNames) : null;
   const sessionList = Object.entries(sessions);
@@ -541,7 +668,8 @@ export default function App() {
   return (
     <SafeAreaProvider>
     <View style={styles.root}>
-      <StatusBar barStyle="light-content" />
+      {/* Gradient screens need light status-bar icons; light pages need dark. */}
+      <StatusBar barStyle={onGradient ? 'light-content' : 'dark-content'} />
 
       {/* Tangem-Style NFC Scanning Bottom Sheet */}
       <NfcScanSheet
@@ -602,8 +730,10 @@ export default function App() {
         />
       ) : (
       <View style={{ flex: 1 }}>
-        <GradientBackdrop from={colors.bg} to="#0A0F1E" />
-        <ScrollView contentContainerStyle={styles.container}>
+        <ScrollView
+          contentContainerStyle={styles.container}
+          showsVerticalScrollIndicator={false}
+        >
           {error ? <Text style={styles.errorAlert}>{error}</Text> : null}
 
           {screen === 'loading' && (
@@ -615,14 +745,16 @@ export default function App() {
 
           {screen === 'home' && account && (
           <HomeScreen
-            handle={ensName || short(account.address)}
+            handle={identity.ensName || ensName || short(account.address)}
+            address={account.address}
             onSettings={() => setScreen('settings')}
+            onIdentity={() => { setIdentityStatus(null); setScreen('identity'); }}
+            onUnlock={() => setScreen('unlock')}
+            ensName={identity.ensName}
+            guardianSet={!!identity.guardianAddress}
             balance={balance}
             fiat={fiatBalance}
             locked={locked}
-            subaccounts={STANDARD_SUBACCOUNTS}
-            activeSubaccount={activeSubaccount}
-            onSwitch={(p) => onSwitchSubaccount(p as SubAccountPurpose)}
             onSend={() => (locked ? setScreen('unlock') : setSendVisible(true))}
             onReceive={() => setReceiveVisible(true)}
             onConnect={() => (locked ? setScreen('unlock') : setScreen('connect'))}
@@ -636,7 +768,7 @@ export default function App() {
         )}
 
         {/* ---- WalletConnect Scanner Screen ---- */}
-                {screen === 'connect' && (
+        {screen === 'connect' && (
           <ConnectScreen
             granted={permission?.granted ?? false}
             onRequestPermission={requestPermission}
@@ -646,11 +778,12 @@ export default function App() {
         )}
 
         {/* ---- Clear-Signing Review Screen (HERO Experience) ---- */}
-                {screen === 'review' && summary && (
+        {screen === 'review' && summary && (
           <ReviewScreen
             result={summary.result}
             fallback={summary.fallback}
             dappName={(wcEvent as any)?.params?.proposer?.metadata?.name}
+            counterparty={counterparty}
             needsPassword={!password}
             password={password}
             onPassword={setPassword}
@@ -662,192 +795,91 @@ export default function App() {
 
         {/* ---- Token Approvals Dashboard Screen ---- */}
         {screen === 'approvals' && (
-          <View style={styles.approvalsContainer}>
-            <Text style={styles.screenHeading}>Token Approvals</Text>
-            <Text style={styles.screenDesc}>
-              View active smart contracts authorized to spend tokens from your wallet. One-tap revoke to eliminate drain vectors.
-            </Text>
-
-            {scanningApprovals ? (
-              <View style={styles.centerContainer}>
-                <ActivityIndicator color={colors.brand} />
-                <Text style={styles.loadingText}>Scanning Sepolia allowances…</Text>
-              </View>
-            ) : approvalsList.length === 0 ? (
-              <View style={styles.cleanStateCard}>
-                <Text style={styles.cleanStateEmoji}>🛡️</Text>
-                <Text style={styles.cleanStateTitle}>No Active Approvals</Text>
-                <Text style={styles.cleanStateText}>
-                  Your wallet has no outstanding token spending approvals.
-                </Text>
-              </View>
-            ) : (
-              approvalsList.map((appr, i) => (
-                <View key={i} style={styles.approvalItemCard}>
-                  <View style={styles.approvalItemHeader}>
-                    <Text style={styles.approvalItemSymbol}>{appr.tokenSymbol}</Text>
-                    {appr.isUnlimited && (
-                      <View style={styles.unlimitedTag}>
-                        <Text style={styles.unlimitedTagText}>UNLIMITED</Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={styles.approvalSpenderText}>
-                    Spender: {short(appr.spenderAddress)}
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.revokeButton}
-                    onPress={() => onRevokeApproval(appr.tokenAddress, appr.spenderAddress)}
-                  >
-                    <Text style={styles.revokeButtonText}>Revoke Allowance (0)</Text>
-                  </TouchableOpacity>
-                </View>
-              ))
-            )}
-
-            <TouchableOpacity style={styles.backButton} onPress={() => setScreen('home')}>
-              <Text style={styles.backButtonText}>← Back to Portfolio</Text>
-            </TouchableOpacity>
-          </View>
+          <ApprovalsScreen
+            scanning={scanningApprovals}
+            approvals={approvalsList}
+            onRevoke={onRevokeApproval}
+            onRescan={onScanApprovals}
+            onBack={() => setScreen('home')}
+          />
         )}
 
         {/* ---- Policy Block Screen ---- */}
         {screen === 'policy_block' && policyResult && (
-          <View style={styles.policyBlockContainer}>
-            <View style={styles.policyAlertCard}>
-              <Text style={styles.policyAlertEmoji}>🚫</Text>
-              <Text style={styles.policyAlertTitle}>Transaction Blocked</Text>
-              <Text style={styles.policyAlertReason}>{policyResult.reason}</Text>
-            </View>
-
-            {policyResult.canOverride && (
-              <TouchableOpacity
-                style={styles.primaryActionButton}
-                onPress={async () => {
-                  const verified = await verifyHuman(
-                    'policy-override',
-                    'Policy Override — World ID Check',
-                    'World ID Selfie Check: Prove a live human is present before overriding your spending policy limits.',
-                  );
-                  if (!verified.success) return;
-                  setPolicyResult(null);
-                  setScreen('review');
-                }}
-              >
-                <Text style={styles.primaryActionText}>🌐 World ID Override & Proceed</Text>
-              </TouchableOpacity>
-            )}
-
-            <TouchableOpacity style={styles.rejectButton} onPress={onReject}>
-              <Text style={styles.rejectButtonText}>Reject Transaction</Text>
-            </TouchableOpacity>
-          </View>
+          <PolicyBlockScreen
+            reason={policyResult.reason}
+            canOverride={policyResult.canOverride}
+            worldGated={settings.requireWorldIdOnOverride}
+            onOverride={async () => {
+              if (settings.requireWorldIdOnOverride) {
+                const verified = await verifyHuman(
+                  'policy-override',
+                  'Policy Override — World ID Check',
+                  'World ID Selfie Check: prove a live human is present before overriding your spending policy.',
+                );
+                if (!verified.success) return;
+              }
+              setPolicyResult(null);
+              setScreen('review');
+            }}
+            onReject={onReject}
+          />
         )}
 
         {/* ---- Settings Screen ---- */}
-        {screen === 'settings' && (
-          <View style={styles.settingsContainer}>
-            <Text style={styles.screenHeading}>Settings & Security</Text>
-
-            {/* Policy settings card */}
-            <View style={styles.settingsCard}>
-              <Text style={styles.settingsCardHeader}>SPENDING POLICY</Text>
-              <View style={styles.settingItemRow}>
-                <Text style={styles.settingItemLabel}>Daily Allowance Cap</Text>
-                <Text style={styles.settingItemValue}>
-                  {(Number(DEFAULT_POLICY.dailyLimitWei) / 1e18).toFixed(2)} ETH
-                </Text>
-              </View>
-              <View style={styles.settingItemRow}>
-                <Text style={styles.settingItemLabel}>Per-Tx Limit</Text>
-                <Text style={styles.settingItemValue}>
-                  {(Number(DEFAULT_POLICY.perTxLimitWei) / 1e18).toFixed(2)} ETH
-                </Text>
-              </View>
-              <View style={styles.settingItemRow}>
-                <Text style={styles.settingItemLabel}>Infinite Approvals</Text>
-                <Text style={[styles.settingItemValue, { color: colors.ok }]}>Blocked ✓</Text>
-              </View>
-              <View style={styles.settingItemRow}>
-                <Text style={styles.settingItemLabel}>Emergency Panic Vault</Text>
-                <TouchableOpacity onPress={() => setScreen('recovery_vault')}>
-                  <Text style={[styles.settingItemValue, { color: colors.brandSoft }]}>
-                    Configure →
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* View Live Logs Button */}
-            <TouchableOpacity
-              style={[styles.lockWalletButton, { marginBottom: 10, borderColor: colors.brand }]}
-              onPress={() => setLogModalVisible(true)}
-            >
-              <Text style={{ color: colors.brandSoft, fontSize: 15, fontWeight: '600' }}>
-                📜 View Live Device Logs
-              </Text>
-            </TouchableOpacity>
-
-            {/* Lock button */}
-            <TouchableOpacity
-              style={styles.lockWalletButton}
-              onPress={() => {
-                setLocked(true);
-                setPassword('');
-                setScreen('home');
-              }}
-            >
-              <Text style={styles.lockWalletText}>🔒 Lock Wallet Session</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.backButton} onPress={() => setScreen('home')}>
-              <Text style={styles.backButtonText}>← Back to Portfolio</Text>
-            </TouchableOpacity>
-          </View>
+        {screen === 'settings' && account && (
+          <SettingsScreen
+            settings={settings}
+            onChange={updateSettings}
+            ensName={identity.ensName}
+            address={account.address}
+            onIdentity={() => { setIdentityStatus(null); setScreen('identity'); }}
+            onRecovery={() => setScreen('recovery_vault')}
+            onLogs={() => setLogModalVisible(true)}
+            onLock={() => { setLocked(true); setPassword(''); setScreen('home'); }}
+            onBack={() => setScreen('home')}
+          />
         )}
 
-        {/* ---- Emergency Recovery Vault Screen ---- */}
+        {/* ---- Identity (ENS) Screen ---- */}
+        {screen === 'identity' && account && (
+          <IdentityScreen
+            address={account.address}
+            ensName={identity.ensName}
+            parentName={ENS_PARENT_NAME}
+            guardianAddress={identity.guardianAddress}
+            guardianEns={identity.guardianEns}
+            busy={identityBusy}
+            status={identityStatus}
+            onCheckAndClaim={onCheckAndClaim}
+            onSetGuardian={onSetGuardian}
+            onBack={() => setScreen('home')}
+          />
+        )}
+
+        {/* ---- Emergency Recovery Screen ---- */}
         {screen === 'recovery_vault' && (
-          <View style={styles.settingsContainer}>
-            <Text style={styles.screenHeading}>Emergency Panic Vault</Text>
-            <Text style={styles.screenDesc}>
-              If your phone or keys are compromised, tap below to instantly sweep all ETH and tokens to your recovery vault, and revoke all approvals.
-            </Text>
-
-            <View style={styles.settingsCard}>
-              <Text style={styles.settingsCardHeader}>VAULT CONFIGURATION</Text>
-              <RecoveryVaultDisplay />
-            </View>
-
-            {recoveryStatusResult && (
-              <View style={[styles.settingsCard, { borderColor: colors.ok }]}>
-                <Text style={[styles.settingsCardHeader, { color: colors.ok }]}>SWEEP REPORT</Text>
-                <Text style={styles.settingItemLabel}>ETH Swept: {recoveryStatusResult.ethSwept}</Text>
-                <Text style={styles.settingItemLabel}>Tokens Swept: {recoveryStatusResult.tokensSwept}</Text>
-                <Text style={styles.settingItemLabel}>Approvals Revoked: {recoveryStatusResult.approvalsRevoked}</Text>
-              </View>
-            )}
-
-            <TouchableOpacity
-              style={styles.panicSweepButton}
-              onPress={async () => {
+          <RecoveryScreen
+            ensName={identity.ensName}
+            guardianAddress={identity.guardianAddress}
+            guardianEns={identity.guardianEns}
+            worldGated={settings.requireWorldIdOnSweep}
+            sweepResult={recoveryStatusResult}
+            busy={busy}
+            onIdentity={() => { setIdentityStatus(null); setScreen('identity'); }}
+            onSweep={async () => {
+              if (settings.requireWorldIdOnSweep) {
                 const verified = await verifyHuman(
                   'emergency-sweep',
                   'Emergency Evacuation — World ID Check',
-                  'World ID Selfie Check: Prove a live human is present before executing emergency funds evacuation.',
+                  'World ID Selfie Check: prove a live human is present before sweeping all funds.',
                 );
                 if (!verified.success) return;
-                openNfcScan('sweep');
-              }}
-              disabled={recoveryRunning}
-            >
-              <Text style={styles.panicSweepText}>🚨 Tap NFC Card to Sweep All Funds</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.backButton} onPress={() => setScreen('home')}>
-              <Text style={styles.backButtonText}>← Back to Portfolio</Text>
-            </TouchableOpacity>
-          </View>
+              }
+              openNfcScan('sweep');
+            }}
+            onBack={() => setScreen('home')}
+          />
         )}
         </ScrollView>
       </View>
@@ -857,785 +889,24 @@ export default function App() {
   );
 }
 
-function RecoveryVaultDisplay() {
-  const [addr, setAddr] = useState<string | null>(null);
-  useEffect(() => {
-    getRecoveryAddress().then(setAddr);
-  }, []);
-  if (addr) {
-    return <Text style={{ color: colors.text, fontSize: 13, marginTop: 4 }}>Vault Target: {short(addr)} ✓</Text>;
-  }
-  return <Text style={{ color: colors.warn, fontSize: 13, marginTop: 4 }}>⚠️ Vault address not configured</Text>;
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  container: { paddingHorizontal: spacing.lg, paddingTop: 52, paddingBottom: 60 },
-
-  // Header Bar
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.lg,
-  },
-  identityPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  avatarCircle: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: colors.brand,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  avatarLetter: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  identityText: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: '600',
-    marginRight: 6,
-  },
-  copyIcon: {
-    color: colors.textDim,
-    fontSize: 12,
-  },
-  brandTitle: {
-    color: colors.text,
-    fontSize: 24,
-    fontWeight: '700',
-    letterSpacing: -0.5,
-  },
-  brandSubtitle: {
-    color: colors.textDim,
-    fontSize: 12,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  networkBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surfaceAlt,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  greenPulse: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: colors.ok,
-    marginRight: 6,
-  },
-  networkBadgeText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  settingsIconButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.surfaceAlt,
-    borderWidth: 1,
-    borderColor: colors.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  settingsIconText: {
-    fontSize: 14,
-  },
+  /**
+   * No padding here on purpose: each screen owns its own insets so the Home
+   * gradient hero can bleed edge-to-edge and under the status bar.
+   */
+  container: { flexGrow: 1 },
   errorAlert: {
     backgroundColor: colors.dangerBg,
     borderColor: colors.dangerBorder,
     borderWidth: 1,
     color: colors.danger,
-    padding: 12,
-    borderRadius: radius.md,
-    marginBottom: spacing.md,
-    fontSize: 13,
-  },
-
-  // Setup / Unlock
-  setupContainer: {
-    paddingVertical: spacing.xl,
-  },
-  setupHeroCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.xl,
-    padding: spacing.xl,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.xl,
-  },
-  setupHeroIcon: {
-    fontSize: 48,
-    marginBottom: spacing.md,
-  },
-  setupHeroTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 6,
-  },
-  setupHeroSubtitle: {
-    fontSize: 14,
-    color: colors.textDim,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  setupForm: {
-    width: '100%',
-  },
-  fieldLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textMuted,
-    marginBottom: 8,
-  },
-  passwordInput: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    color: colors.text,
-    padding: 16,
-    fontSize: 16,
-    marginBottom: spacing.lg,
-  },
-  primaryActionButton: {
-    backgroundColor: colors.brand,
-    borderRadius: radius.md,
-    paddingVertical: 18,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: colors.brand,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 14,
-    elevation: 8,
-  },
-  actionButtonIcon: {
-    fontSize: 18,
-    marginRight: 8,
-  },
-  primaryActionText: {
-    color: colors.onBrand,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  cancelLink: {
-    marginTop: spacing.lg,
-    alignItems: 'center',
-  },
-  cancelLinkText: {
-    color: colors.textDim,
-    fontSize: 14,
-    fontWeight: '500',
-  },
-
-  // Money Envelopes Carousel
-  envelopeCarousel: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: spacing.md,
-  },
-  envelopeTab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface,
-    paddingVertical: 9,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  envelopeTabActive: {
-    borderColor: colors.brand,
-    backgroundColor: colors.brandBg,
-  },
-  envelopeTabIcon: {
-    fontSize: 12,
-    marginRight: 4,
-  },
-  envelopeTabText: {
-    color: colors.textDim,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  envelopeTabTextActive: {
-    color: colors.brandSoft,
-  },
-
-  // Portfolio Hero Card
-  portfolioHeroCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.xl,
-    padding: spacing.xl,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.lg,
-  },
-  portfolioLabel: {
-    color: colors.textDim,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1,
-  },
-  portfolioFiat: {
-    color: colors.text,
-    fontSize: 38,
-    fontWeight: '700',
-    letterSpacing: -1,
-    marginTop: 6,
-  },
-  portfolioEthRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
-  },
-  portfolioEth: {
-    color: colors.textMuted,
-    fontSize: 15,
-    fontWeight: '500',
-  },
-  trendBadge: {
-    backgroundColor: colors.okBg,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: radius.pill,
-  },
-  trendBadgeText: {
-    color: colors.ok,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-
-  // 4 Quick Actions (Phantom / Rainbow style)
-  quickActionsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: spacing.xl,
-    paddingHorizontal: spacing.sm,
-  },
-  actionCircleButton: {
-    alignItems: 'center',
-    width: 64,
-  },
-  actionIconCircle: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: colors.surfaceAlt,
-    borderWidth: 1,
-    borderColor: colors.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  actionIconCircleBrand: {
-    backgroundColor: colors.brand,
-    borderColor: colors.brandHover,
-  },
-  actionCircleIconText: {
-    fontSize: 20,
-  },
-  actionCircleLabel: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-
-  // Connected Dapps Card
-  connectedDappsCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
     padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.md,
-  },
-  dappHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  dappSectionTitle: {
-    color: colors.textDim,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1,
-  },
-  dappCountPill: {
-    backgroundColor: colors.brandBg,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: radius.pill,
-  },
-  dappCountText: {
-    color: colors.brandSoft,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  sessionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderColor: colors.border,
-  },
-  sessionDappName: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  sessionDappUrl: {
-    color: colors.textDim,
-    fontSize: 12,
-  },
-  disconnectButton: {
-    borderColor: colors.danger,
-    borderWidth: 1,
-    borderRadius: radius.sm,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  disconnectButtonText: {
-    color: colors.danger,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-
-  // Segmented Tabs
-  segmentedTabBar: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.md,
-  },
-  tabButton: {
-    paddingVertical: 10,
-    paddingHorizontal: spacing.lg,
-    marginRight: spacing.md,
-  },
-  tabButtonActive: {
-    borderBottomWidth: 2,
-    borderColor: colors.brand,
-  },
-  tabButtonText: {
-    color: colors.textDim,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  tabButtonTextActive: {
-    color: colors.text,
-  },
-
-  // Assets / Activity List
-  assetsListContainer: {
-    gap: 10,
-  },
-  tokenRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  tokenIconBadge: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.surfaceAlt,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  tokenEmoji: {
-    fontSize: 20,
-  },
-  tokenMeta: {
-    flex: 1,
-  },
-  tokenSymbol: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  tokenNetwork: {
-    color: colors.textDim,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  tokenBalanceCol: {
-    alignItems: 'flex-end',
-  },
-  tokenBalanceAmount: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  tokenBalanceFiat: {
-    color: colors.textDim,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  activityItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  activityIconBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.surfaceAlt,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  activityEmoji: {
-    fontSize: 16,
-  },
-  activityStatusTag: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.brandSoft,
-  },
-
-  // Scanner
-  scannerWrapper: {
-    paddingVertical: spacing.md,
-  },
-  scannerHeader: {
-    marginBottom: spacing.md,
-  },
-  scannerTitle: {
-    color: colors.text,
-    fontSize: 22,
-    fontWeight: '700',
-  },
-  scannerSub: {
-    color: colors.textDim,
-    fontSize: 13,
-    marginTop: 4,
-  },
-  cameraBox: {
-    height: 360,
-    borderRadius: radius.xl,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginVertical: spacing.md,
-  },
-
-  // Review Screen (HERO)
-  reviewContainer: {
-    paddingVertical: spacing.sm,
-  },
-  reviewHeroHeader: {
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  riskPill: {
-    backgroundColor: colors.infoBg,
-    borderColor: colors.infoBorder,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: radius.pill,
-    marginBottom: 6,
-  },
-  riskPillDanger: {
-    backgroundColor: colors.dangerBg,
-    borderColor: colors.dangerBorder,
-  },
-  riskPillWarn: {
-    backgroundColor: colors.warnBg,
-    borderColor: colors.warnBorder,
-  },
-  riskPillText: {
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1,
-  },
-  dappOriginText: {
-    color: colors.textDim,
-    fontSize: 13,
-  },
-  summaryCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.lg,
-  },
-  plainEnglishSummary: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: '700',
-    lineHeight: 26,
-    marginBottom: spacing.md,
-  },
-  riskFlagCard: {
-    padding: spacing.md,
-    borderRadius: radius.sm,
-    backgroundColor: colors.surfaceAlt,
-    marginTop: 6,
-  },
-  riskFlagCardDanger: {
-    backgroundColor: colors.dangerBg,
-    borderColor: colors.dangerBorder,
-    borderWidth: 1,
-  },
-  riskFlagCardWarn: {
-    backgroundColor: colors.warnBg,
-    borderColor: colors.warnBorder,
-    borderWidth: 1,
-  },
-  rejectButton: {
-    marginTop: spacing.md,
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  rejectButtonText: {
-    color: colors.danger,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-
-  // Approvals & Clean State
-  approvalsContainer: {
-    paddingVertical: spacing.sm,
-  },
-  screenHeading: {
-    color: colors.text,
-    fontSize: 24,
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-  screenDesc: {
-    color: colors.textDim,
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: spacing.lg,
-  },
-  cleanStateCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.xl,
-    padding: spacing.xxl,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginVertical: spacing.lg,
-  },
-  cleanStateEmoji: {
-    fontSize: 48,
-    marginBottom: spacing.md,
-  },
-  cleanStateTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  cleanStateText: {
-    color: colors.textDim,
-    fontSize: 13,
-    textAlign: 'center',
-    marginTop: 4,
-  },
-  approvalItemCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.md,
-  },
-  approvalItemHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  approvalItemSymbol: {
-    color: colors.text,
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  unlimitedTag: {
-    backgroundColor: colors.dangerBg,
-    borderColor: colors.dangerBorder,
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  unlimitedTagText: {
-    color: colors.danger,
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  approvalSpenderText: {
-    color: colors.textDim,
-    fontSize: 13,
-    fontFamily: 'monospace',
-    marginBottom: spacing.md,
-  },
-  revokeButton: {
-    backgroundColor: colors.surfaceAlt,
-    borderColor: colors.danger,
-    borderWidth: 1,
-    paddingVertical: 10,
     borderRadius: radius.md,
-    alignItems: 'center',
-  },
-  revokeButtonText: {
-    color: colors.danger,
+    marginHorizontal: spacing.xl,
+    marginTop: spacing.huge,
     fontSize: 13,
-    fontWeight: '600',
   },
-  backButton: {
-    marginTop: spacing.lg,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  backButtonText: {
-    color: colors.textMuted,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-
-  // Settings & Recovery
-  settingsContainer: {
-    paddingVertical: spacing.sm,
-  },
-  settingsCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.lg,
-  },
-  settingsCardHeader: {
-    color: colors.textDim,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1,
-    marginBottom: spacing.md,
-  },
-  settingItemRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderColor: colors.border,
-  },
-  settingItemLabel: {
-    color: colors.textMuted,
-    fontSize: 14,
-  },
-  settingItemValue: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  lockWalletButton: {
-    backgroundColor: colors.surfaceAlt,
-    borderColor: colors.border,
-    borderWidth: 1,
-    paddingVertical: 14,
-    borderRadius: radius.md,
-    alignItems: 'center',
-  },
-  lockWalletText: {
-    color: colors.warn,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  panicSweepButton: {
-    backgroundColor: colors.danger,
-    paddingVertical: 16,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    marginTop: spacing.md,
-  },
-  panicSweepText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-
-  // Policy Alert
-  policyBlockContainer: {
-    paddingVertical: spacing.xl,
-  },
-  policyAlertCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.warn,
-    borderWidth: 1,
-    borderRadius: radius.xl,
-    padding: spacing.xl,
-    alignItems: 'center',
-    marginBottom: spacing.xl,
-  },
-  policyAlertEmoji: {
-    fontSize: 48,
-    marginBottom: spacing.md,
-  },
-  policyAlertTitle: {
-    color: colors.warn,
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-  policyAlertReason: {
-    color: colors.textMuted,
-    fontSize: 14,
-    textAlign: 'center',
-  },
-
-  // Layout Helpers
-  centerContainer: {
-    alignItems: 'center',
-    paddingVertical: 48,
-  },
-  loadingText: {
-    color: colors.textDim,
-    fontSize: 13,
-    marginTop: 10,
-  },
+  centerContainer: { alignItems: 'center', paddingVertical: 120 },
+  loadingText: { color: colors.textDim, fontSize: 13, marginTop: spacing.md },
 });
