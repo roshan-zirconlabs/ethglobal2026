@@ -8,7 +8,9 @@
 import { useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -474,10 +476,15 @@ export function Sheet({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={styles.sheet}>
-        <View style={styles.grabber} />
-        {children}
-      </View>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.sheetWrap}
+      >
+        <View style={styles.sheet}>
+          <View style={styles.grabber} />
+          {children}
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -587,6 +594,7 @@ const styles = StyleSheet.create({
   },
 
   backdrop: { flex: 1, backgroundColor: 'rgba(11,18,32,0.45)' },
+  sheetWrap: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   sheet: {
     backgroundColor: colors.surface,
     borderTopLeftRadius: radius.xxl,
@@ -603,4 +611,77 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginBottom: spacing.lg,
   },
+});
+
+/**
+ * Error dialog — errors are surfaced as a modal over the app, not as a banner
+ * pinned inside the page. Chain errors (revert traces) are long, so the body
+ * scrolls and the raw text stays selectable/copyable.
+ */
+export function ErrorDialog({
+  visible,
+  message,
+  onClose,
+  onCopy,
+}: {
+  visible: boolean;
+  message: string;
+  onClose: () => void;
+  onCopy?: (text: string) => void;
+}) {
+  if (!visible) return null;
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={errStyles.backdrop}>
+        <View style={errStyles.card}>
+          <Text style={errStyles.icon}>⚠️</Text>
+          <Text style={errStyles.title}>Something went wrong</Text>
+          <ScrollView style={errStyles.body} contentContainerStyle={{ padding: spacing.md }}>
+            <Text style={errStyles.message} selectable>
+              {message}
+            </Text>
+          </ScrollView>
+          {onCopy ? (
+            <TouchableOpacity onPress={() => onCopy(message)} style={{ paddingVertical: spacing.sm }}>
+              <Text style={errStyles.copy}>Copy details</Text>
+            </TouchableOpacity>
+          ) : null}
+          <View style={{ height: spacing.sm }} />
+          <Button title="Dismiss" onPress={onClose} />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const errStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(11,18,32,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: colors.surface,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+    padding: spacing.xl,
+    ...shadow.raised,
+  },
+  icon: { fontSize: 34, textAlign: 'center' },
+  title: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.text,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  body: { maxHeight: 260, backgroundColor: colors.dangerBg, borderRadius: radius.md },
+  message: { color: colors.danger, fontSize: 13, lineHeight: 19 },
+  copy: { color: colors.brand, fontSize: 13, fontWeight: '700', textAlign: 'center' },
 });

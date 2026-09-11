@@ -17,8 +17,8 @@
  */
 import { Alert } from 'react-native';
 import { sha256, toUtf8Bytes } from 'ethers';
-
 import { logger } from './logger';
+import { runSelfieCheckReal } from './worldid.real';
 
 export const WORLD_APP_ID = process.env.EXPO_PUBLIC_WORLD_APP_ID || 'app_staging_notwallet_guard';
 export const WORLD_ACTION_ID = process.env.EXPO_PUBLIC_WORLD_ACTION || 'policy-override-guard';
@@ -84,7 +84,14 @@ export async function verifyHuman(
   promptMessage: string = 'Prove a live person is present before this high-risk irreversible action.',
 ): Promise<WorldVerifyResult> {
   logger.log('WORLD_ID', `Human verification requested for action: ${action}`);
-  // TODO(native build): if IDKit + quick-crypto are available, run the real
-  // Selfie Check session here and return { verified: true, mode: 'idkit', ... }.
+  // Try the real Selfie Check; if the native crypto module isn't in this build
+  // yet (i.e. before the World rebuild), it returns null and we use the sandbox
+  // gate so the app keeps working either way.
+  try {
+    const real = await runSelfieCheckReal(action, promptMessage);
+    if (real) return real;
+  } catch {
+    /* fall through to sandbox */
+  }
   return runSandboxGate(action, promptTitle, promptMessage);
 }

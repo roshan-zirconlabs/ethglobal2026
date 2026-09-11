@@ -12,7 +12,7 @@
 import { useRef } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Defs, Line, LinearGradient, Rect, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, LinearGradient, Path, Polygon, Rect, Stop } from 'react-native-svg';
 
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 
@@ -87,34 +87,38 @@ export function HeroPanel({
   );
 }
 
-/** The NotWallet mark — a bold 6-point asterisk. */
+/**
+ * The NotWallet mark — a hexagonal vault with a keyhole. Reads as "secure,
+ * self-custody" at any size and renders crisply in white on the gradients.
+ */
 export function LogoMark({ size = 72, color = '#FFFFFF' }: { size?: number; color?: string }) {
   const c = size / 2;
-  const r = size * 0.42;
-  const w = Math.max(3, size * 0.06);
-  const rays = [0, 60, 120].map((deg) => {
-    const a = (deg * Math.PI) / 180;
-    return {
-      x1: c - r * Math.cos(a),
-      y1: c - r * Math.sin(a),
-      x2: c + r * Math.cos(a),
-      y2: c + r * Math.sin(a),
-    };
-  });
+  const r = size * 0.44; // hexagon radius
+  const stroke = Math.max(2.5, size * 0.075);
+  // Pointy-top hexagon vertices.
+  const pts = Array.from({ length: 6 }, (_, i) => {
+    const a = ((-90 + 60 * i) * Math.PI) / 180;
+    return `${(c + r * Math.cos(a)).toFixed(2)},${(c + r * Math.sin(a)).toFixed(2)}`;
+  }).join(' ');
+  // Keyhole: a circle over a tapered stem.
+  const holeR = size * 0.11;
+  const holeCy = c - size * 0.05;
+  const stemW = size * 0.06;
+  const stemBottom = c + size * 0.18;
   return (
-    <Svg width={size} height={size}>
-      {rays.map((l, i) => (
-        <Line
-          key={i}
-          x1={l.x1}
-          y1={l.y1}
-          x2={l.x2}
-          y2={l.y2}
-          stroke={color}
-          strokeWidth={w}
-          strokeLinecap="round"
-        />
-      ))}
+    <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <Polygon
+        points={pts}
+        fill="none"
+        stroke={color}
+        strokeWidth={stroke}
+        strokeLinejoin="round"
+      />
+      <Circle cx={c} cy={holeCy} r={holeR} fill={color} />
+      <Path
+        d={`M ${c - stemW / 2} ${holeCy} L ${c - stemW * 0.9} ${stemBottom} L ${c + stemW * 0.9} ${stemBottom} L ${c + stemW / 2} ${holeCy} Z`}
+        fill={color}
+      />
     </Svg>
   );
 }

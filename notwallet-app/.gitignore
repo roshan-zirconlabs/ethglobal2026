@@ -39,3 +39,9 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Foundry
+contracts/lib/
+contracts/out/
+contracts/cache/
+contracts/broadcast/

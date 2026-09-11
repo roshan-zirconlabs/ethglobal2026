@@ -10,11 +10,22 @@
  */
 import { CameraView } from 'expo-camera';
 import { useState, type ReactNode } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClearSignResult } from './clearsign';
 import type { TokenApproval } from './approvals';
+import type { Agent, WalletAccount } from './agents';
+import { timeAgo, type TxRecord } from './history';
 import type { WalletSettings } from './settings';
 import { colors, gradients, radius, spacing, typography } from './theme';
 import {
@@ -29,12 +40,14 @@ import {
   RowDivider,
   SectionHeader,
   SectionLabel,
+  Sheet,
   TextField,
   Toggle,
 } from './ui/kit';
 import { ActionTile, GradientBackdrop, HeroPanel, IdentityCard, LogoMark } from './ui/visual';
 
 const short = (a: string) => (a && a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
+const ACT_ICON: Record<string, string> = { send: '↑', fund: '💰', mint: '🪙', ens: '🏷️', revoke: '🛡', contract: '⛓' };
 
 // ── Onboarding: Setup / Unlock (full-bleed radiant gradient) ──────────────────
 export function AuthScreen({
@@ -57,7 +70,18 @@ export function AuthScreen({
     <View style={{ flex: 1 }}>
       <GradientBackdrop stops={gradients.onboard} />
       <SafeAreaView style={{ flex: 1, paddingHorizontal: spacing.xl }} edges={['top', 'bottom']}>
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        {/* Scrollable + keyboard-aware: otherwise the on-screen keyboard just
+            squeezes this fixed layout and covers the password field. */}
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+        <ScrollView
+          contentContainerStyle={{ flexGrow: 1, justifyContent: 'space-between' }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.huge }}>
           <LogoMark size={84} />
           <Text style={styles.brand}>NotWallet</Text>
           <Text style={styles.brandSub}>Hardware-grade security · Seedless</Text>
@@ -94,6 +118,8 @@ export function AuthScreen({
             </TouchableOpacity>
           ) : null}
         </View>
+        </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </View>
   );
@@ -111,10 +137,63 @@ function HeroInput(props: React.ComponentProps<typeof TextInput>) {
   );
 }
 
+
+/** A bottom sheet listing all wallets — used to switch accounts and to pick
+ *  which wallet connects to a dapp. */
+export function AccountSheet({
+  visible,
+  title,
+  subtitle,
+  accounts,
+  activeAddress,
+  onPick,
+  onClose,
+}: {
+  visible: boolean;
+  title: string;
+  subtitle?: string;
+  accounts: WalletAccount[];
+  activeAddress?: string;
+  onPick: (address: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Sheet visible={visible} onClose={onClose}>
+      <Text style={styles.sheetTitle}>{title}</Text>
+      {subtitle ? <Text style={[styles.cardBody, { marginBottom: spacing.sm }]}>{subtitle}</Text> : null}
+      {accounts.map((a, i) => {
+        const active = activeAddress && a.address.toLowerCase() === activeAddress.toLowerCase();
+        return (
+          <View key={a.address}>
+            {i > 0 ? <RowDivider /> : null}
+            <ListRow
+              icon={a.kind === 'main' ? '🔑' : '🤖'}
+              iconTone={a.kind === 'main' ? 'brand' : 'neutral'}
+              title={a.ensName ?? (a.kind === 'main' ? 'Main wallet' : a.label)}
+              subtitle={
+                a.kind === 'agent' && a.budgetUsd != null
+                  ? `${a.chain || 'sub-wallet'} · $${a.budgetUsd} · ${short(a.address)}`
+                  : short(a.address)
+              }
+              value={active ? '✓' : undefined}
+              valueTone="ok"
+              onPress={() => onPick(a.address)}
+            />
+          </View>
+        );
+      })}
+    </Sheet>
+  );
+}
+
 // ── Home: gradient hero + light content sheet ────────────────────────────────
 export function HomeScreen({
   handle,
   address,
+  accounts,
+  activeAddress,
+  onSwitchAccount,
+  isSubWallet,
   balance,
   fiat,
   locked,
@@ -126,12 +205,20 @@ export function HomeScreen({
   onShield,
   onSettings,
   onIdentity,
+  onAgents,
+  agentCount,
   onUnlock,
   sessions,
   onDisconnect,
+  history,
 }: {
   handle: string;
   address: string;
+  accounts: WalletAccount[];
+  activeAddress: string;
+  onSwitchAccount: (address: string) => void;
+  isSubWallet: boolean;
+  history: TxRecord[];
   balance: string;
   fiat: string;
   locked: boolean;
@@ -143,20 +230,37 @@ export function HomeScreen({
   onShield: () => void;
   onSettings: () => void;
   onIdentity: () => void;
+  onAgents: () => void;
+  agentCount: number;
   onUnlock: () => void;
   sessions: [string, any][];
   onDisconnect: (topic: string) => void;
 }) {
+  const [switcher, setSwitcher] = useState(false);
   return (
     <View style={{ flex: 1 }}>
+      <AccountSheet
+        visible={switcher}
+        title="Switch wallet"
+        subtitle="Operate as your main wallet or any sub-wallet."
+        accounts={accounts}
+        activeAddress={activeAddress}
+        onPick={(addr) => { setSwitcher(false); onSwitchAccount(addr); }}
+        onClose={() => setSwitcher(false)}
+      />
       <HeroPanel stops={gradients.hero}>
         <Row justify="space-between" align="flex-start">
-          <View style={{ flex: 1 }}>
-            <Text style={styles.heroEyebrow}>WALLET</Text>
-            <Text style={styles.heroHandle} numberOfLines={1}>
-              {handle}
-            </Text>
-          </View>
+          <TouchableOpacity
+            style={{ flex: 1 }}
+            activeOpacity={0.7}
+            onPress={() => accounts.length > 1 && setSwitcher(true)}
+          >
+            <Text style={styles.heroEyebrow}>{isSubWallet ? 'SUB-WALLET' : 'WALLET'}</Text>
+            <Row gap={6}>
+              <Text style={styles.heroHandle} numberOfLines={1}>{handle}</Text>
+              {accounts.length > 1 ? <Text style={styles.heroCaret}>⌄</Text> : null}
+            </Row>
+          </TouchableOpacity>
           <IconButton icon="⚙" onPress={onSettings} onHero />
         </Row>
 
@@ -204,6 +308,19 @@ export function HomeScreen({
             onPress={onIdentity}
             chevron
           />
+          <RowDivider />
+          <ListRow
+            icon="🤖"
+            iconTone={agentCount > 0 ? 'brand' : 'neutral'}
+            title="Agents"
+            subtitle={
+              agentCount > 0
+                ? `${agentCount} budgeted sub-account${agentCount === 1 ? '' : 's'}`
+                : 'Give a bot its own budgeted account'
+            }
+            onPress={onAgents}
+            chevron
+          />
         </Card>
 
         {/* Connected dapps */}
@@ -243,6 +360,27 @@ export function HomeScreen({
             valueSub={fiat}
           />
         </Card>
+
+        {history.length > 0 ? (
+          <>
+            <View style={{ height: spacing.xl }} />
+            <SectionHeader title="Activity" />
+            <Card padded={false} style={styles.rowCard}>
+              {history.slice(0, 6).map((h, i) => (
+                <View key={`${h.hash}-${i}`}>
+                  {i > 0 ? <RowDivider /> : null}
+                  <ListRow
+                    icon={ACT_ICON[h.kind] ?? '•'}
+                    iconTone={h.kind === 'revoke' ? 'danger' : h.kind === 'fund' ? 'ok' : 'neutral'}
+                    title={h.title}
+                    subtitle={timeAgo(h.timestamp)}
+                    value={h.toAddress ? short(h.toAddress) : undefined}
+                  />
+                </View>
+              ))}
+            </Card>
+          </>
+        ) : null}
 
         <Text style={styles.footNote} numberOfLines={1}>
           {short(address)}
@@ -451,6 +589,7 @@ export function SettingsScreen({
   onIdentity,
   onRecovery,
   onLogs,
+  onMintUsdc,
   onLock,
   onBack,
 }: {
@@ -461,6 +600,7 @@ export function SettingsScreen({
   onIdentity: () => void;
   onRecovery: () => void;
   onLogs: () => void;
+  onMintUsdc: () => void;
   onLock: () => void;
   onBack: () => void;
 }) {
@@ -553,6 +693,17 @@ export function SettingsScreen({
       </Card>
 
       <View style={{ height: spacing.xl }} />
+      <SectionHeader title="Testnet" />
+      <Card>
+        <Text style={styles.cardBody}>
+          Claiming your name is free — it only needs Sepolia gas. This faucet mints test
+          USDC for other flows (e.g. registering your own .eth name).
+        </Text>
+        <View style={{ height: spacing.md }} />
+        <Button title="Mint 100 test USDC" variant="secondary" onPress={onMintUsdc} />
+      </Card>
+
+      <View style={{ height: spacing.xl }} />
       <Button title="View live device logs" variant="secondary" onPress={onLogs} />
       <View style={{ height: spacing.sm }} />
       <Button title="🔒 Lock wallet session" variant="ghost" onPress={onLock} />
@@ -569,6 +720,7 @@ export function IdentityScreen({
   guardianEns,
   busy,
   status,
+  needsGas,
   onCheckAndClaim,
   onSetGuardian,
   onBack,
@@ -576,6 +728,7 @@ export function IdentityScreen({
   address: string;
   ensName: string | null;
   parentName: string;
+  needsGas?: boolean;
   guardianAddress: string | null;
   guardianEns: string | null;
   busy: boolean;
@@ -601,6 +754,20 @@ export function IdentityScreen({
       />
 
       <View style={{ height: spacing.xl }} />
+
+      {needsGas ? (
+        <>
+          <Card tone="warn">
+            <SectionLabel>NEEDS SEPOLIA GAS</SectionLabel>
+            <Text style={[styles.cardBody, { marginTop: spacing.xs }]}>
+              Claiming writes to ENS on Sepolia, so this wallet needs a little test ETH first.
+              Fund this address:
+            </Text>
+            <Text style={[styles.spender, { marginTop: spacing.sm }]} selectable>{address}</Text>
+          </Card>
+          <View style={{ height: spacing.xl }} />
+        </>
+      ) : null}
 
       {!ensName ? (
         <Card>
@@ -909,6 +1076,11 @@ const styles = StyleSheet.create({
 
   // Home hero (on gradient)
   heroEyebrow: { color: colors.onHeroDim, fontSize: 11, fontWeight: '700', letterSpacing: 1.1 },
+  heroCaret: { color: 'rgba(255,255,255,0.8)', fontSize: 18, fontWeight: '800', marginTop: -2 },
+  sheetTitle: { color: colors.text, fontSize: 18, fontWeight: '800', marginBottom: spacing.sm },
+  agentBalance: { color: colors.text, fontSize: 30, fontWeight: '800', letterSpacing: -0.6 },
+  meterTrack: { height: 8, borderRadius: 4, backgroundColor: colors.surfaceAlt, marginTop: spacing.md, overflow: 'hidden' },
+  meterFill: { height: 8, borderRadius: 4, backgroundColor: colors.brand },
   heroHandle: { color: '#FFFFFF', fontSize: 18, fontWeight: '700', marginTop: 3 },
   heroBalanceLabel: { color: colors.onHeroMuted, fontSize: 13, fontWeight: '600' },
   heroBalance: { color: '#FFFFFF', fontSize: 42, fontWeight: '800', letterSpacing: -1.4, marginTop: 4 },
@@ -973,3 +1145,307 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
 });
+
+// ── Agents: named, budgeted sub-accounts under your ENS name ─────────────────
+export function AgentsScreen({
+  agents,
+  ensName,
+  identityName,
+  createParentName,
+  busy,
+  status,
+  onCreate,
+  onOpen,
+  onIdentity,
+  onBack,
+}: {
+  agents: Agent[];
+  ensName: string | null;
+  identityName: string | null;
+  createParentName: string | null;
+  busy: boolean;
+  status: string | null;
+  onCreate: (draft: { label: string; chain: string; budgetUsd: number; note: string }) => void;
+  onOpen: (agent: Agent) => void;
+  onIdentity: () => void;
+  onBack: () => void;
+}) {
+  const [label, setLabel] = useState('');
+  const [chain, setChain] = useState('');
+  const [budget, setBudget] = useState(50);
+  const [note, setNote] = useState('');
+  const clean = label.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+  // Only TOP-LEVEL sub-wallets here (children live inside their parent's detail).
+  const parentForNew = createParentName || identityName || ensName || '';
+  const topLevel = agents.filter(
+    (a) => !a.revokedAt && a.fullName.toLowerCase().endsWith(`.${(identityName ?? ensName ?? '').toLowerCase()}`)
+      && a.fullName.split('.').length === ((identityName ?? ensName ?? '').split('.').length + 1),
+  );
+
+  if (!ensName) {
+    return (
+      <Page
+        title="Agents"
+        subtitle="Named sub-accounts you can hand to an AI agent or bot, each with its own budget."
+        onBack={onBack}
+      >
+        <Card tone="alt">
+          <Text style={styles.cardBody}>
+            🔒 Claim your ENS name first. Agents are issued as subnames underneath it,
+            e.g. <Text style={{ fontWeight: '700' }}>bnb.alice.notwallet.eth</Text>.
+          </Text>
+          <View style={{ height: spacing.md }} />
+          <Button title="Set up identity" variant="secondary" onPress={onIdentity} />
+        </Card>
+      </Page>
+    );
+  }
+
+  return (
+    <Page
+      title="Agents"
+      subtitle={`Each is its own wallet under ${ensName}. Connect it to dapps, fund it, and it can only ever spend what you give it.`}
+      onBack={onBack}
+    >
+      {topLevel.length > 0 ? (
+        <>
+          <SectionHeader title={`Sub-wallets · ${topLevel.length}`} />
+          <Card padded={false} style={styles.rowCard}>
+            {topLevel.map((a, i) => (
+              <View key={a.fullName}>
+                {i > 0 ? <RowDivider /> : null}
+                <ListRow
+                  icon="🤖"
+                  iconTone="brand"
+                  title={a.label}
+                  subtitle={`${a.chain || 'any chain'} · ${short(a.address)}`}
+                  value={`$${a.budgetUsd}`}
+                  valueSub={a.ensRegistered ? 'on ENS' : 'budget'}
+                  onPress={() => onOpen(a)}
+                  chevron
+                />
+              </View>
+            ))}
+          </Card>
+          <View style={{ height: spacing.xl }} />
+        </>
+      ) : null}
+
+      <SectionHeader title={createParentName ? 'New sub-agent' : 'New sub-wallet'} />
+      {createParentName ? (
+        <Text style={[styles.namePreview, { marginTop: -spacing.xs }]}>
+          nesting under <Text style={{ color: colors.brand, fontWeight: '800' }}>{createParentName}</Text>
+        </Text>
+      ) : null}
+      <Card>
+        <Text style={styles.cardBody}>
+          Give it a name, a purpose and a budget. It gets its own key and address —
+          created instantly, ready to connect to dapps. It can never touch your main
+          balance, only what you send it.
+        </Text>
+        <View style={{ height: spacing.md }} />
+        <TextField
+          label="Agent name"
+          value={label}
+          onChangeText={setLabel}
+          placeholder="bnb"
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {clean ? (
+          <Text style={styles.namePreview}>
+            → <Text style={{ color: colors.brand, fontWeight: '800' }}>{clean}.{parentForNew}</Text>
+          </Text>
+        ) : null}
+        <TextField
+          label="Chain / venue"
+          value={chain}
+          onChangeText={setChain}
+          placeholder="BNB Chain"
+          autoCapitalize="none"
+        />
+        <NumberField label="Budget" value={budget} onChangeNumber={setBudget} suffix="USD" />
+        <TextField
+          label="What is it for? (optional)"
+          value={note}
+          onChangeText={setNote}
+          placeholder="Trading bot"
+        />
+        <Button
+          title={busy ? 'Working…' : 'Create agent'}
+          onPress={() => onCreate({ label: clean, chain: chain.trim(), budgetUsd: budget, note: note.trim() })}
+          loading={busy}
+          disabled={!clean}
+        />
+        <Text style={styles.centerNote}>
+          You'll tap your card once to derive the sub-wallet's key. Its name lives under
+          your identity; you can switch to it from Home or pick it when connecting a dapp.
+        </Text>
+      </Card>
+
+      {status ? <Text style={styles.centerNote}>{status}</Text> : null}
+
+      {agents.some((a) => a.revokedAt) ? (
+        <>
+          <View style={{ height: spacing.xl }} />
+          <SectionHeader title="Revoked" />
+          <Card padded={false} style={styles.rowCard}>
+            {agents
+              .filter((a) => a.revokedAt)
+              .map((a, i) => (
+                <View key={a.fullName}>
+                  {i > 0 ? <RowDivider /> : null}
+                  <ListRow icon="🚫" title={a.fullName} subtitle="Revoked" />
+                </View>
+              ))}
+          </Card>
+        </>
+      ) : null}
+    </Page>
+  );
+}
+
+// ── Agent detail: fund, customize, nest, register on ENS ─────────────────────
+export function AgentDetailScreen({
+  agent,
+  ensRegistered,
+  isActive,
+  ethBalance,
+  usdcBalance,
+  children,
+  identityName,
+  busy,
+  status,
+  onFundUsdc,
+  onFundGas,
+  onSaveMeta,
+  onSwitchTo,
+  onAddSubAgent,
+  onRegisterEns,
+  onOpenChild,
+  onRevoke,
+  onBack,
+}: {
+  agent: Agent;
+  ensRegistered: boolean;
+  isActive: boolean;
+  ethBalance: string;
+  usdcBalance: string;
+  children: Agent[];
+  identityName: string | null;
+  busy: boolean;
+  status: string | null;
+  onFundUsdc: (amount: number) => void;
+  onFundGas: () => void;
+  onSaveMeta: (patch: { budgetUsd: number; note: string }) => void;
+  onSwitchTo: () => void;
+  onAddSubAgent: () => void;
+  onRegisterEns: () => void;
+  onOpenChild: (a: Agent) => void;
+  onRevoke: () => void;
+  onBack: () => void;
+}) {
+  const [budget, setBudget] = useState(agent.budgetUsd);
+  const [note, setNote] = useState(agent.note ?? '');
+  const funded = parseFloat(usdcBalance);
+  const pct = agent.budgetUsd > 0 ? Math.min(100, Math.round((funded / agent.budgetUsd) * 100)) : 0;
+
+  return (
+    <Page title={agent.label} subtitle={agent.fullName} onBack={onBack}>
+      {/* Funding status — the budget IS the balance */}
+      <Card tone="brand">
+        <SectionLabel>FUNDED BALANCE</SectionLabel>
+        <Row justify="space-between" align="flex-end" style={{ marginTop: spacing.xs }}>
+          <Text style={styles.agentBalance}>${usdcBalance}</Text>
+          <Text style={styles.cardBody}>of ${agent.budgetUsd} budget</Text>
+        </Row>
+        <View style={styles.meterTrack}>
+          <View style={[styles.meterFill, { width: `${pct}%` }]} />
+        </View>
+        <Text style={[styles.cardBody, { marginTop: spacing.sm }]}>
+          This sub-wallet can only ever spend what it holds — its budget is its balance.
+          Gas: {ethBalance} ETH.
+        </Text>
+      </Card>
+
+      <View style={{ height: spacing.md }} />
+      <Row gap={spacing.md}>
+        <View style={{ flex: 1 }}>
+          <Button
+            title={busy ? '…' : `Fund $${agent.budgetUsd}`}
+            onPress={() => onFundUsdc(agent.budgetUsd)}
+            loading={busy}
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Button title="Top up gas" variant="secondary" onPress={onFundGas} />
+        </View>
+      </Row>
+      {!isActive ? (
+        <>
+          <View style={{ height: spacing.sm }} />
+          <Button title="Use this wallet" variant="secondary" onPress={onSwitchTo} />
+        </>
+      ) : null}
+
+      {/* ENS status */}
+      <View style={{ height: spacing.xl }} />
+      <SectionHeader title="ENS name" />
+      <Card tone={ensRegistered ? 'ok' : 'surface'}>
+        {ensRegistered ? (
+          <Text style={{ color: colors.text, fontWeight: '700' }}>
+            {agent.fullName} ✓ registered on ENS
+          </Text>
+        ) : (
+          <>
+            <Text style={styles.cardBody}>
+              Register {agent.fullName} on-chain so it resolves as a real ENS name others can send to.
+            </Text>
+            <View style={{ height: spacing.md }} />
+            <Button title={busy ? 'Working…' : 'Register on ENS'} onPress={onRegisterEns} loading={busy} />
+          </>
+        )}
+      </Card>
+
+      {/* Customize */}
+      <View style={{ height: spacing.xl }} />
+      <SectionHeader title="Customize" />
+      <Card>
+        <NumberField label="Budget" value={budget} onChangeNumber={setBudget} suffix="USD" />
+        <TextField label="What it's for" value={note} onChangeText={setNote} placeholder="Trading bot" />
+        <Button title="Save changes" variant="secondary" onPress={() => onSaveMeta({ budgetUsd: budget, note })} />
+      </Card>
+
+      {/* Nested sub-agents */}
+      <View style={{ height: spacing.xl }} />
+      <SectionHeader title={`Sub-agents · ${children.length}`} />
+      {children.length > 0 ? (
+        <Card padded={false} style={styles.rowCard}>
+          {children.map((c, i) => (
+            <View key={c.fullName}>
+              {i > 0 ? <RowDivider /> : null}
+              <ListRow
+                icon="🤖"
+                title={c.label}
+                subtitle={`${c.chain || 'sub-agent'} · $${c.budgetUsd} · ${short(c.address)}`}
+                onPress={() => onOpenChild(c)}
+                chevron
+              />
+            </View>
+          ))}
+        </Card>
+      ) : null}
+      <View style={{ height: spacing.md }} />
+      <Button title="+ Add sub-agent" variant="secondary" onPress={onAddSubAgent} />
+      <Text style={styles.centerNote}>
+        e.g. two bots under {agent.label}: they become {`bot1.${agent.fullName}`}. Nesting is the
+        ENSv2 hierarchy — each name can own its own sub-names.
+      </Text>
+
+      {status ? <Text style={styles.centerNote}>{status}</Text> : null}
+
+      <View style={{ height: spacing.xl }} />
+      <Button title="Remove this sub-wallet" variant="danger" onPress={onRevoke} />
+    </Page>
+  );
+}

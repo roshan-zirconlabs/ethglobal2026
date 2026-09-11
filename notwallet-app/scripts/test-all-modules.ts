@@ -22,7 +22,17 @@ import { checkPolicy, DEFAULT_POLICY } from '../src/policies';
 // 4. Test Approvals
 import { buildRevokeData, formatTokenAmount } from '../src/approvals';
 // 5. Test ENS builders
-import { buildSubnodeRecordTx, buildSetTextRecordTx, buildSetAddrTx } from '../src/ens';
+import {
+  buildRegisterTx,
+  buildSetTextTx,
+  buildUnregisterTx,
+  labelId,
+  defaultExpiry,
+  ENSV2,
+  USER_IDENTITY_ROLES,
+  AGENT_ROLES,
+  ROLE,
+} from '../src/ens';
 
 let passed = 0;
 let failed = 0;
@@ -160,25 +170,49 @@ async function runTests() {
 
   // ---- TEST 5: ENSv2 Transaction Builders ----
   console.log('\n📦 [5/6] Testing ENSv2 Builders...');
-  const subTx = buildSubnodeRecordTx(
-    '0x0000000000000000000000000000000000000000000000000000000000000000',
-    keccak256(toUtf8Bytes('alice')),
-    '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
-  );
-  assert(subTx.data.length > 10, 'Subnode registration transaction generated');
+  const registerTx = buildRegisterTx({
+    registryAddress: ENSV2.ethRegistry,
+    label: 'alice',
+    owner: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
+    resolver: ENSV2.publicResolver,
+    roleBitmap: USER_IDENTITY_ROLES,
+    expiry: defaultExpiry(1),
+  });
+  assert(registerTx.data.startsWith('0x') && registerTx.data.length > 200, 'ENSv2 register() tx encodes');
+  assert(registerTx.to === ENSV2.ethRegistry, 'register() targets the registry');
 
-  const textTx = buildSetTextRecordTx(
-    '0x0000000000000000000000000000000000000000000000000000000000000000',
-    'recovery-target',
+  const textTx = buildSetTextTx(
+    ENSV2.publicResolver,
+    'alice.notwallet.eth',
+    'notwallet.recovery',
     '0x1234567890123456789012345678901234567890',
   );
-  assert(textTx.data.length > 10, 'Text record configuration transaction generated');
+  assert(textTx.data.length > 10, 'ENSv2 setText() tx encodes (DNS-encoded name)');
 
-  // ---- TEST 6: Subaccounts & Envelopes ----
-  console.log('\n📦 [6/6] Testing Money Envelopes...');
-  const { STANDARD_SUBACCOUNTS } = await import('../src/subaccounts');
-  assert(STANDARD_SUBACCOUNTS.length === 4, 'Standard envelopes (Primary, Daily, Savings, Sandbox) defined');
+  const ensRevokeTx = buildUnregisterTx(ENSV2.ethRegistry, 'bnb');
+  assert(ensRevokeTx.data.length > 10, 'ENSv2 unregister() tx encodes');
+  assert(labelId('bnb') === labelId('bnb'), 'labelId is deterministic');
+  assert(labelId('bnb') !== labelId('eth'), 'labelId is unique per label');
 
+  // Containment: an agent must not be able to mint children or re-delegate.
+  assert((AGENT_ROLES & ROLE.REGISTRAR) === 0n, 'Agent roles exclude ROLE_REGISTRAR');
+  assert((USER_IDENTITY_ROLES & ROLE.REGISTRAR) === ROLE.REGISTRAR, 'User identity can mint subnames');
+
+  // ---- TEST 6: Agent sub-accounts ----
+  console.log('\n📦 [6/6] Testing Agent Sub-accounts...');
+  const { agentDerivationLabel, normalizeLabel, activeAgents } = await import('../src/agents');
+  assert(
+    agentDerivationLabel('bnb.alice.notwallet.eth') !== agentDerivationLabel('trade.alice.notwallet.eth'),
+    'Each agent name derives a distinct key salt',
+  );
+  assert(normalizeLabel('  BNB Chain! ') === 'bnbchain', 'Agent labels normalize to valid ENS labels');
+  assert(
+    activeAgents([
+      { label: 'a', fullName: 'a.x.eth', address: '0x', chain: '', budgetUsd: 1, createdAt: 0 },
+      { label: 'b', fullName: 'b.x.eth', address: '0x', chain: '', budgetUsd: 1, createdAt: 0, revokedAt: 1 },
+    ] as any).length === 1,
+    'Revoked agents are excluded from the active list',
+  );
   console.log('\n========================================');
   console.log(`📊 Test Results: ${passed} Passed, ${failed} Failed`);
   console.log('========================================\n');

@@ -47,7 +47,7 @@ export type TrackedApproval = {
  * name owns; changing it requires a signed ENS write (card + password), so it's
  * already tamper-resistant. This local copy simply mirrors that pointer so the
  * offline sweep knows where to send funds — hence it's updatable, matching the
- * mutable/revocable ENS guardian model (new_plan §6.1).
+ * mutable/revocable ENS guardian model.
  */
 export async function setRecoveryAddress(address: string): Promise<void> {
   await SecureStore.setItemAsync(RECOVERY_KEY, address);

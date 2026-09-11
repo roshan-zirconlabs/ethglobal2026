@@ -27,7 +27,8 @@
         "android.permission.USE_FINGERPRINT",
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.INTERNET"
-      ]
+      ],
+      "softwareKeyboardLayoutMode": "pan"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -54,7 +55,8 @@
           "icon": "./assets/icon.png",
           "color": "#4f46e5"
         }
-      ]
+      ],
+      "react-native-quick-crypto"
     ],
     "extra": {
       "eas": {
