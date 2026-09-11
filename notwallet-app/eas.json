@@ -9,16 +9,46 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_WC_PROJECT_ID": "740f93dfe6f41324b579c0dc196b4e94",
+        "EXPO_PUBLIC_WORLD_APP_ID": "app_dc2dad8c2e46789828ce53b5e04ce4e4",
+        "EXPO_PUBLIC_WORLD_ACTION": "policy-override-guard",
+        "EXPO_PUBLIC_WORLD_RP_ID": "rp_076a92bfa8ea1bce",
+        "EXPO_PUBLIC_ENS_PARENT_LABEL": "notwallet",
+        "EXPO_PUBLIC_ENS_REGISTRAR": "0x6ab7F8D372c3a12bF3267B49754bFF661329FB87",
+        "EXPO_PUBLIC_ENS_PARENT_REGISTRY": "0x6ab7F8D372c3a12bF3267B49754bFF661329FB87"
       }
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_WC_PROJECT_ID": "740f93dfe6f41324b579c0dc196b4e94",
+        "EXPO_PUBLIC_WORLD_APP_ID": "app_dc2dad8c2e46789828ce53b5e04ce4e4",
+        "EXPO_PUBLIC_WORLD_ACTION": "policy-override-guard",
+        "EXPO_PUBLIC_WORLD_RP_ID": "rp_076a92bfa8ea1bce",
+        "EXPO_PUBLIC_ENS_PARENT_LABEL": "notwallet",
+        "EXPO_PUBLIC_ENS_REGISTRAR": "0x6ab7F8D372c3a12bF3267B49754bFF661329FB87",
+        "EXPO_PUBLIC_ENS_PARENT_REGISTRY": "0x6ab7F8D372c3a12bF3267B49754bFF661329FB87"
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_WC_PROJECT_ID": "740f93dfe6f41324b579c0dc196b4e94",
+        "EXPO_PUBLIC_WORLD_APP_ID": "app_dc2dad8c2e46789828ce53b5e04ce4e4",
+        "EXPO_PUBLIC_WORLD_ACTION": "policy-override-guard",
+        "EXPO_PUBLIC_WORLD_RP_ID": "rp_076a92bfa8ea1bce",
+        "EXPO_PUBLIC_ENS_PARENT_LABEL": "notwallet",
+        "EXPO_PUBLIC_ENS_REGISTRAR": "0x6ab7F8D372c3a12bF3267B49754bFF661329FB87",
+        "EXPO_PUBLIC_ENS_PARENT_REGISTRY": "0x6ab7F8D372c3a12bF3267B49754bFF661329FB87"
+      }
     }
   },
   "submit": {

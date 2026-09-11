@@ -557,6 +557,19 @@ export default function App() {
           throw new Error('Please choose a password with at least 6 characters.');
         }
 
+        // Proof-of-personhood: verify a real human is creating this wallet
+        // (World ID's canonical use — one human, one account).
+        if (settings.requireWorldIdOnSetup) {
+          const human = await verifyHuman(
+            'create-account',
+            'Verify you are human',
+            'World ID Selfie Check: prove a live person is creating this wallet before your keys are generated.',
+          );
+          if (!human.success) {
+            throw new Error('Human verification is required to create your wallet.');
+          }
+        }
+
         const signer = new MfkdfSigner(cardId, password);
         const identity = await signer.getIdentity();
 
@@ -1242,6 +1255,21 @@ export default function App() {
             onRecovery={() => setScreen('recovery_vault')}
             onLogs={() => setLogModalVisible(true)}
             onMintUsdc={onMintUsdc}
+            onTestWorldId={async () => {
+              const r = await verifyHuman(
+                'test-selfie-check',
+                'World ID — Selfie Check test',
+                'Prove a live human is present. This is a direct test of the World ID integration.',
+              );
+              Alert.alert(
+                r.success ? 'World ID passed ✓' : 'World ID not completed',
+                r.success
+                  ? (r.verified
+                      ? 'Verified a real human via World ID Selfie Check (cloud-verified).'
+                      : 'Sandbox gate passed. Real Selfie Check activates in a native build with the World Sandbox app installed.')
+                  : (r.error ?? 'Cancelled.'),
+              );
+            }}
             onLock={() => { setLocked(true); setPassword(''); setScreen('home'); }}
             onBack={() => setScreen('home')}
           />

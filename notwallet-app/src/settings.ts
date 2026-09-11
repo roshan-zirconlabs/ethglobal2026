@@ -26,6 +26,8 @@ export type WalletSettings = {
   blockSetApprovalForAll: boolean;
   /** Minutes to cool down before transfers > 50% of balance (0 = off). */
   cooldownMinutes: number;
+  /** Require a World ID Selfie Check when creating the wallet (proof-of-personhood). */
+  requireWorldIdOnSetup: boolean;
   /** Require a World ID Selfie Check before overriding a blocked policy. */
   requireWorldIdOnOverride: boolean;
   /** Require a World ID Selfie Check before the emergency sweep. */
@@ -38,6 +40,7 @@ export const DEFAULT_SETTINGS: WalletSettings = {
   blockInfiniteApprovals: true,
   blockSetApprovalForAll: true,
   cooldownMinutes: 0,
+  requireWorldIdOnSetup: true,
   requireWorldIdOnOverride: true,
   requireWorldIdOnSweep: true,
 };

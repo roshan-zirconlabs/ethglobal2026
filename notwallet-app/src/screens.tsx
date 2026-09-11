@@ -590,6 +590,7 @@ export function SettingsScreen({
   onRecovery,
   onLogs,
   onMintUsdc,
+  onTestWorldId,
   onLock,
   onBack,
 }: {
@@ -601,6 +602,7 @@ export function SettingsScreen({
   onRecovery: () => void;
   onLogs: () => void;
   onMintUsdc: () => void;
+  onTestWorldId: () => void;
   onLock: () => void;
   onBack: () => void;
 }) {
@@ -677,6 +679,13 @@ export function SettingsScreen({
       <View style={{ height: spacing.xl }} />
       <SectionHeader title="Human verification" />
       <Card>
+        <Toggle
+          label="Selfie Check to create a wallet"
+          hint="Prove a real human (not a bot) is creating the account — one human, one wallet."
+          value={settings.requireWorldIdOnSetup}
+          onValueChange={(v) => set('requireWorldIdOnSetup', v)}
+        />
+        <RowDivider />
         <Toggle
           label="Selfie Check to override a limit"
           hint="Require a live-human World ID check before overriding a blocked tx."

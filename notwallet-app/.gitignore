@@ -45,3 +45,9 @@ contracts/lib/
 contracts/out/
 contracts/cache/
 contracts/broadcast/
+
+# build binaries
+*.apk
+*.aab
+*.ipa
+*.tar.gz

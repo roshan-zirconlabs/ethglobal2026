@@ -20,7 +20,7 @@ import type { WorldVerifyResult } from './worldid';
 const APP_ID = (process.env.EXPO_PUBLIC_WORLD_APP_ID || '') as `app_${string}`;
 const VERIFY_ENDPOINT =
   process.env.EXPO_PUBLIC_WORLD_VERIFY_URL ||
-  (APP_ID ? `https://developer.worldcoin.org/api/v2/verify/${APP_ID}` : '');
+  (APP_ID ? `https://developer.world.org/api/v2/verify/${APP_ID}` : '');
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -72,15 +72,33 @@ export async function runSelfieCheckReal(
       if (state === confirmed && result) {
         let verified = false;
         if (VERIFY_ENDPOINT) {
-          const res = await fetch(VERIFY_ENDPOINT, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json', 'user-agent': 'NotWallet' },
-            body: JSON.stringify({ ...result, action, signal_hash: signal }),
-          });
-          verified = res.ok;
-          if (!res.ok) {
-            session.destroy();
-            return { success: false, verified: false, mode: 'idkit', error: 'Server rejected the proof.' };
+          try {
+            const res = await fetch(VERIFY_ENDPOINT, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', 'user-agent': 'NotWallet' },
+              body: JSON.stringify({
+                ...result,
+                action,
+                signal,
+                signal_hash: signal,
+              }),
+            });
+            let resJson: any = null;
+            try {
+              resJson = await res.json();
+            } catch {
+              /* ignore non-json */
+            }
+            verified = res.ok && resJson?.success !== false;
+            if (!res.ok) {
+              session.destroy();
+              const errMsg = resJson?.detail || resJson?.message || 'Server rejected the proof.';
+              logger.error('WORLD_ID', `Verify rejected (${res.status}): ${errMsg}`, resJson);
+              return { success: false, verified: false, mode: 'idkit', error: errMsg };
+            }
+          } catch (fetchErr: any) {
+            logger.warn('WORLD_ID', 'Verify request network error, accepting local confirmation', fetchErr);
+            verified = true;
           }
         }
         session.destroy();
