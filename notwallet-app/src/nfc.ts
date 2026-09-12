@@ -1,33 +1,49 @@
 /**
- * Read an NFC card's UID via the native NFC stack. Any NFC card/tag works — we
- * only use its stable id as the "something you have" factor.
+ * NFC card reader
  *
- * Card reading is STRICTLY READ-ONLY — we never write to the card (it could be
- * a user's bank card, transit pass, student ID, or personal keycard).
+ * Reads the NFC tag/card UID using Android Reader Mode.
  *
- * On Android, we enable Reader Mode (NfcAdapter.enableReaderMode) with exclusive
- * hardware access for NFC-A, NFC-B, NFC-F, NFC-V, and IsoDep. This bypasses OS
- * payment interception (Google Wallet) and reads raw card UIDs in milliseconds.
+ * READ-ONLY:
+ * We never write to NFC cards/tags (they can be debit/credit/transit cards).
+ *
+ * Android:
+ * - Uses react-native-nfc-manager Reader Mode (NfcAdapter.enableReaderMode)
+ * - Exclusive hardware access for NFC-A, NFC-B, NFC-F and NFC-V
+ * - Skips NDEF inspection (FLAG_READER_SKIP_NDEF_CHECK) so detection is instant
+ * - Bypasses Google Wallet / Samsung Pay preemption
+ *
+ * iOS:
+ * - Uses CoreNFC requestTechnology()
  */
+
 import { Platform } from 'react-native';
-import NfcManager, { NfcEvents, NfcTech, TagEvent } from 'react-native-nfc-manager';
+import NfcManager, {
+  NfcEvents,
+  NfcTech,
+  TagEvent,
+} from 'react-native-nfc-manager';
+
 import { logger } from './logger';
 
 let started = false;
 
-const NFC_TIMEOUT_MS = 30_000; // 30 seconds wait for card tap
+const NFC_TIMEOUT_MS = 30_000;
 
 /**
  * Android Reader Mode flags:
- *   FLAG_READER_NFC_A (0x1): ISO 14443-3A (Mifare, NTAG, bank cards)
- *   FLAG_READER_NFC_B (0x2): ISO 14443-3B (transit cards, Calypso)
- *   FLAG_READER_NFC_F (0x4): JIS 6319-4 (Sony FeliCa, Suica, Pasmo)
- *   FLAG_READER_NFC_V (0x8): ISO 15693 (vicinity RFID tags)
- *   FLAG_READER_SKIP_NDEF_CHECK (0x80): fast raw UID read without NDEF delays
- *   Sum = 0x1 | 0x2 | 0x4 | 0x8 | 0x80 = 0x8F (143)
+ *   FLAG_READER_NFC_A = 0x01
+ *   FLAG_READER_NFC_B = 0x02
+ *   FLAG_READER_NFC_F = 0x04
+ *   FLAG_READER_NFC_V = 0x08
+ *   FLAG_READER_SKIP_NDEF_CHECK = 0x80
+ *
+ * Total = 0x01 | 0x02 | 0x04 | 0x08 | 0x80 = 0x8F (143)
  */
-const ANDROID_READER_FLAGS = 0x1 | 0x2 | 0x4 | 0x8 | 0x80;
+const ANDROID_READER_FLAGS = 0x01 | 0x02 | 0x04 | 0x08 | 0x80;
 
+/**
+ * Check whether the device has NFC hardware.
+ */
 export async function isNfcSupported(): Promise<boolean> {
   try {
     const supported = await NfcManager.isSupported();
@@ -39,6 +55,9 @@ export async function isNfcSupported(): Promise<boolean> {
   }
 }
 
+/**
+ * Check whether NFC is currently enabled in settings.
+ */
 export async function isNfcEnabled(): Promise<boolean> {
   try {
     if (Platform.OS === 'android') {
@@ -53,6 +72,9 @@ export async function isNfcEnabled(): Promise<boolean> {
   }
 }
 
+/**
+ * Open the Android NFC settings page.
+ */
 export async function openNfcSettings(): Promise<void> {
   try {
     if (Platform.OS === 'android') {
@@ -63,6 +85,9 @@ export async function openNfcSettings(): Promise<void> {
   }
 }
 
+/**
+ * Convert an NFC ID into a consistent lowercase hex string.
+ */
 function normalizeCardId(rawId: unknown): string {
   if (!rawId) return '';
   if (typeof rawId === 'string') {
@@ -77,106 +102,147 @@ function normalizeCardId(rawId: unknown): string {
   return String(rawId).trim().toLowerCase();
 }
 
+/**
+ * Start the NFC manager if it isn't already started.
+ */
+async function ensureNfcStarted(): Promise<void> {
+  if (started) return;
+
+  try {
+    await NfcManager.start();
+    started = true;
+    logger.nfc('NFC_START', 'NfcManager started successfully');
+  } catch (err) {
+    logger.error('NFC_START', 'Failed to start NfcManager', err);
+    throw err;
+  }
+}
+
+/**
+ * Read an NFC card/tag UID.
+ *
+ * Android: Uses Reader Mode with all protocol flags.
+ * iOS: Uses requestTechnology().
+ */
 export async function readNfcCardId(): Promise<string> {
-  // Always ensure clean previous state
+  // Clear any existing active session first
   await cancelNfcRead().catch(() => {});
 
-  if (!started) {
-    try {
-      await NfcManager.start();
-      started = true;
-      logger.nfc('NFC_START', 'NfcManager started successfully');
-    } catch (err) {
-      logger.error('NFC_START', 'Failed to start NfcManager', err);
-    }
+  await ensureNfcStarted();
+
+  logger.nfc('NFC_POLL', 'Waiting for NFC card/tag...');
+
+  if (Platform.OS === 'android') {
+    return readNfcCardAndroid();
   }
 
-  logger.nfc('NFC_POLL', 'Listening for NFC card tap with Reader Mode enabled...');
+  return readNfcCardIOS();
+}
 
+/**
+ * Android Reader Mode implementation.
+ */
+async function readNfcCardAndroid(): Promise<string> {
   return new Promise<string>((resolve, reject) => {
-    let resolved = false;
+    let finished = false;
 
-    const timer = setTimeout(() => {
-      if (resolved) return;
-      resolved = true;
-      cancelNfcRead().catch(() => {});
-      reject(new Error('NFC timeout — hold card firmly to the back of the phone.'));
-    }, NFC_TIMEOUT_MS);
-
-    const onCardDetected = (cardId: string) => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(timer);
-      cancelNfcRead().catch(() => {});
-      logger.nfc('NFC_READ', `Card read success (UID: ${cardId.slice(0, 4)}***)`);
-      resolve(cardId);
+    const finish = (cleanup: () => void) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeoutId);
+      cleanup();
     };
 
-    // Primary Reader Mode event listener
-    NfcManager.setEventListener(NfcEvents.DiscoverTag, (tag: TagEvent) => {
-      const id = normalizeCardId(tag?.id);
-      if (id) {
-        onCardDetected(id);
-      }
-    });
-
-    // Start registration
-    if (Platform.OS === 'android') {
-      NfcManager.registerTagEvent({
-        isReaderModeEnabled: true,
-        readerModeFlags: ANDROID_READER_FLAGS,
-        readerModeDelay: 20,
-      })
-        .then(() => {
-          logger.nfc('NFC_READER', 'Android Reader Mode active');
-        })
-        .catch((err) => {
-          logger.warn('NFC_READER', 'registerTagEvent failed, falling back to tech request', err);
-          // Fallback to requestTechnology if registerTagEvent fails
-          fallbackTechRequest().then((id) => {
-            if (id) onCardDetected(id);
-          }).catch(() => {});
-        });
-    } else {
-      // iOS CoreNFC path
-      fallbackTechRequest().then((id) => {
-        if (id) onCardDetected(id);
-      }).catch((err) => {
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timer);
-          reject(err);
-        }
+    const timeoutId = setTimeout(() => {
+      finish(() => {
+        logger.warn('NFC_TIMEOUT', 'No NFC card detected within timeout');
+        cancelNfcRead().catch(() => {});
+        reject(
+          new Error(
+            'NFC timeout — hold the card firmly against the upper-back of the phone.',
+          ),
+        );
       });
-    }
+    }, NFC_TIMEOUT_MS);
+
+    const handleTag = (tag: TagEvent) => {
+      logger.nfc('NFC_TAG_DETECTED', `NFC tag detected: ${JSON.stringify(tag)}`);
+
+      const id = normalizeCardId(tag?.id);
+      if (!id) {
+        logger.warn('NFC_READ', 'NFC tag detected but it has no readable ID');
+        return;
+      }
+
+      finish(() => {
+        logger.nfc('NFC_READ', `Card read success (UID: ${id.slice(0, 4)}***)`);
+        cancelNfcRead().catch(() => {});
+        resolve(id);
+      });
+    };
+
+    // 1. Attach the DiscoverTag event listener
+    NfcManager.setEventListener(NfcEvents.DiscoverTag, handleTag);
+
+    // 2. Register Android Reader Mode with all protocol flags
+    NfcManager.registerTagEvent({
+      isReaderModeEnabled: true,
+      readerModeFlags: ANDROID_READER_FLAGS,
+      readerModeDelay: 10,
+    })
+      .then(() => {
+        logger.nfc(
+          'NFC_READER',
+          `Android Reader Mode active (flags: 0x${ANDROID_READER_FLAGS.toString(16)})`,
+        );
+      })
+      .catch((err) => {
+        finish(() => {
+          logger.error('NFC_READER', 'Failed to enable Android Reader Mode', err);
+          cancelNfcRead().catch(() => {});
+          reject(err);
+        });
+      });
   });
 }
 
-async function fallbackTechRequest(): Promise<string> {
+/**
+ * iOS implementation via CoreNFC.
+ */
+async function readNfcCardIOS(): Promise<string> {
   try {
     await NfcManager.requestTechnology([
       NfcTech.IsoDep,
       NfcTech.NfcA,
       NfcTech.Ndef,
     ]);
+
     const tag = await NfcManager.getTag();
+    logger.nfc('NFC_TAG_DETECTED', `iOS NFC tag detected: ${JSON.stringify(tag)}`);
+
     const id = normalizeCardId(tag?.id);
-    if (!id) throw new Error('Card has no readable id.');
+    if (!id) {
+      throw new Error('Card was detected but has no readable ID.');
+    }
+
+    logger.nfc('NFC_READ', `Card read success (UID: ${id.slice(0, 4)}***)`);
     return id;
   } finally {
-    NfcManager.cancelTechnologyRequest().catch(() => {});
+    await NfcManager.cancelTechnologyRequest().catch(() => {});
   }
 }
 
 /**
- * Cancel an in-progress NFC read and release hardware resources.
+ * Cancel an active NFC operation.
  */
 export async function cancelNfcRead(): Promise<void> {
   try {
     NfcManager.setEventListener(NfcEvents.DiscoverTag, null);
-    await NfcManager.unregisterTagEvent().catch(() => {});
+    if (Platform.OS === 'android') {
+      await NfcManager.unregisterTagEvent().catch(() => {});
+    }
     await NfcManager.cancelTechnologyRequest().catch(() => {});
   } catch {
-    // Safe to ignore on cleanup
+    // Cleanup should never throw
   }
 }
