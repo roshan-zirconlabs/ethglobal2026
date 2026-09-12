@@ -969,7 +969,7 @@ function Slide7({ dir }: { dir: number }) {
               Scan QR or download directly:
             </p>
             <a
-              href="https://github.com/roshan-zirconlabs/ethglobal2026/releases"
+              href="https://github.com/roshan-zirconlabs/ethglobal2026/releases/tag/apk"
               target="_blank"
               rel="noreferrer"
               className="btn btn-p"
