@@ -9,7 +9,13 @@ import {
   View,
 } from 'react-native';
 import { colors, radius, spacing } from '../theme';
-import { readNfcCardId, cancelNfcRead, isNfcSupported } from '../nfc';
+import {
+  readNfcCardId,
+  cancelNfcRead,
+  isNfcSupported,
+  isNfcEnabled,
+  openNfcSettings,
+} from '../nfc';
 
 interface NfcScanSheetProps {
   visible: boolean;
@@ -28,20 +34,20 @@ export function NfcScanSheet({
 }: NfcScanSheetProps) {
   const [status, setStatus] = useState<'scanning' | 'success' | 'error'>('scanning');
   const [errorMessage, setErrorMessage] = useState('');
+  const [isNfcOff, setIsNfcOff] = useState(false);
 
   // Pulsing radar animations
   const pulseAnim1 = useRef(new Animated.Value(0)).current;
   const pulseAnim2 = useRef(new Animated.Value(0)).current;
   const pulseAnim3 = useRef(new Animated.Value(0)).current;
 
+  const runScan = useRef<() => void>(() => {});
+
   useEffect(() => {
     if (!visible) {
       cancelNfcRead().catch(() => {});
       return;
     }
-
-    setStatus('scanning');
-    setErrorMessage('');
 
     // Start pulsing loops
     const createPulse = (anim: Animated.Value, delay: number) => {
@@ -71,13 +77,23 @@ export function NfcScanSheet({
     pulse2.start();
     pulse3.start();
 
-    // Start native NFC scanning
     let isCancelled = false;
-    (async () => {
+
+    const startScan = async () => {
+      setStatus('scanning');
+      setErrorMessage('');
+      setIsNfcOff(false);
+
       try {
         const supported = await isNfcSupported();
         if (!supported) {
-          throw new Error('NFC is not supported or disabled on this device.');
+          throw new Error('NFC is not supported on this phone hardware.');
+        }
+
+        const enabled = await isNfcEnabled();
+        if (!enabled) {
+          setIsNfcOff(true);
+          throw new Error('NFC is turned OFF in your phone settings.');
         }
 
         const id = await readNfcCardId();
@@ -92,7 +108,10 @@ export function NfcScanSheet({
         setStatus('error');
         setErrorMessage(err?.message || 'Failed to read card.');
       }
-    })();
+    };
+
+    runScan.current = startScan;
+    startScan();
 
     return () => {
       isCancelled = true;
@@ -238,6 +257,32 @@ export function NfcScanSheet({
                 : 'Tap Failed'}
             </Text>
           </View>
+
+          {status === 'scanning' && (
+            <Text style={styles.hintText}>
+              Hold card against the upper-back of your phone (near camera module)
+            </Text>
+          )}
+
+          {/* Action Buttons for Error State */}
+          {status === 'error' && (
+            <View style={styles.errorActionRow}>
+              {isNfcOff && (
+                <TouchableOpacity
+                  style={styles.settingsButton}
+                  onPress={() => openNfcSettings()}
+                >
+                  <Text style={styles.settingsButtonText}>⚙️ Open Phone NFC Settings</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={styles.retryButton}
+                onPress={() => runScan.current?.()}
+              >
+                <Text style={styles.retryButtonText}>🔄 Try Again</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Dev bypass for physical testing if NFC chip is absent */}
           {__DEV__ && status === 'scanning' && (
@@ -401,5 +446,50 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: colors.textDim,
+  },
+  hintText: {
+    fontSize: 12,
+    color: colors.textDim,
+    textAlign: 'center',
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
+    paddingHorizontal: spacing.md,
+  },
+  errorActionRow: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
+    width: '100%',
+    paddingHorizontal: spacing.lg,
+  },
+  settingsButton: {
+    paddingVertical: 10,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: colors.brandSoft,
+    width: '100%',
+    alignItems: 'center',
+  },
+  settingsButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.brandSoft,
+  },
+  retryButton: {
+    paddingVertical: 10,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandSoft,
+    width: '100%',
+    alignItems: 'center',
+  },
+  retryButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.surface,
   },
 });
