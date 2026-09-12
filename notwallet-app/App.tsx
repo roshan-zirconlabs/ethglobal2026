@@ -136,7 +136,7 @@ import { NfcScanSheet } from './src/components/NfcScanSheet';
 import { ReceiveModal } from './src/components/ReceiveModal';
 import { SendModal } from './src/components/SendModal';
 import { LogViewerModal } from './src/components/LogViewerModal';
-import { verifyHuman } from './src/worldid';
+import { verifyHuman, WORLD_ACTION_ID } from './src/worldid';
 
 const SEPOLIA_RPC = 'https://ethereum-sepolia-rpc.publicnode.com';
 const ETH_USD_PRICE = 2400; // Reference price for portfolio display
@@ -561,7 +561,7 @@ export default function App() {
         // (World ID's canonical use — one human, one account).
         if (settings.requireWorldIdOnSetup) {
           const human = await verifyHuman(
-            'create-account',
+            WORLD_ACTION_ID,
             'Verify you are human',
             'World ID Selfie Check: prove a live person is creating this wallet before your keys are generated.',
           );
